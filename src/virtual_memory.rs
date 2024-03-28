@@ -34,11 +34,13 @@ impl<Type> Pointer<Type> {
 
     #[inline(always)]
     pub fn add(&self, offset: usize) -> Pointer<Type> {
+        let offset = offset * std::mem::size_of::<Type>();
         Pointer::new(self.address + offset)
     }
 
     #[inline(always)]
     pub fn sub(&self, offset: usize) -> Pointer<Type> {
+        let offset = offset * std::mem::size_of::<Type>();
         Pointer::new(self.address - offset)
     }
 }
@@ -57,7 +59,12 @@ impl VirtMemory {
     pub fn new(size: usize) -> Self {
         let data = vec![0; size].into_boxed_slice();
         let data = Box::into_raw(data) as *mut u8;
-        Self { data, size }
+        
+        Self::from_mem(data, size)
+    }
+
+    pub fn from_mem(mem: *mut u8, size: usize) -> Self {
+        Self { data: mem, size }
     }
 
     /// Get a reference to the data
@@ -111,42 +118,25 @@ impl VirtMemoryChunk {
     /// Read a byte from the memory chunk at the given address
     /// may panic if the address is out of bounds
     pub unsafe fn read_unchecked<T>(&self, address: usize) -> T {
-        let tmp = std::mem::transmute::<*mut u8, *mut T>(self.data);
-        tmp.add(address).read()
+        let data = self.data.add(address);
+        std::mem::transmute::<*mut u8, *mut T>(data).read()
     }
 
     /// Write a byte to the memory chunk at the given address
     /// may panic if the address is out of bounds
-    pub unsafe fn write_unchecked<T>(&mut self, address: usize, value: T) {
-        let tmp = std::mem::transmute::<*mut u8, *mut T>(self.data);
-        tmp.add(address).write(value);
+    pub unsafe fn write_unchecked<T>(&mut self, address: usize, mut value: T) {
+        let value = std::mem::transmute::<*mut T, *mut u8>(&mut value);
+        self.data.add(address).copy_from(value, std::mem::size_of::<T>());
     }
 
     /// Read a byte from the memory chunk at the given address
-    pub fn read<T>(&self, address: usize) -> Result<T, String> {
-        // adjust address to be address + sizeof(T) so that we account for the amount the pointer moves by
-        let address = address + std::mem::size_of::<T>(); 
-
-        if address <= self.upper_bound && address >= self.lower_bound {
-            // safe because we checked the bounds
-            Ok(unsafe { self.read_unchecked(address) })
-        } else {
-            Err(format!("Out of bounds memory access at => {}", address))
-        }
+    pub fn read<T>(&self, address: usize) -> T {
+        unsafe { self.read_unchecked(address) }
     }
 
     /// Write a byte to the memory chunk at the given address
     /// may panic if the address is out of bounds
-    pub fn write<T>(&mut self, address: usize, value: T) -> Result<(), String> {
-        // adjust address to be address + sizeof(T) so that we account for the amount the pointer moves by
-        let address = address + std::mem::size_of::<T>(); 
-
-        if address <= self.upper_bound && address >= self.lower_bound {
-            // safe because we checked the bounds
-            unsafe { self.write_unchecked(address, value) };
-            Ok(())
-        } else {
-            Err(format!("Out of bounds memory access at => {}", address))
-        }
+    pub fn write<T>(&mut self, address: usize, value: T) {
+        unsafe { self.write_unchecked(address, value); }
     }
 }

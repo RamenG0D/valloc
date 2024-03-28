@@ -1,8 +1,7 @@
 use std::io::Write;
-
 use valloc::allocator::Valloc;
 
-fn main() {
+fn test() {
     let mut v = Valloc::new(4096);
 
     // a vec that stores the variables
@@ -63,4 +62,8 @@ fn main() {
             }
         }
     }
+}
+
+fn main() {
+    test();
 }

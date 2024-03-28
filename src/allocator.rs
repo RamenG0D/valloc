@@ -28,6 +28,16 @@ impl Valloc {
         }
     }
 
+    pub fn from_memory<'a, T>(memory: T) -> Self 
+        where T: Into<&'a [u8]>
+    {
+        let mem: &[u8] = memory.into();
+        Self {
+            memory: VirtMemory::from_mem(mem.as_ptr() as *mut u8, mem.len()),
+            chunks: Vec::new()
+        }
+    }
+
     pub fn get_memory(&self) -> &VirtMemory {
         &self.memory
     }
@@ -71,9 +81,46 @@ impl Valloc {
         self.alloc(size * std::mem::size_of::<T>())
     }
 
+    pub fn realloc<T>(&mut self, ptr: &mut Pointer<T>, size: usize) -> Result<Pointer<T>, String> {
+        // find the chunk that contains the pointer
+        let p = {
+            let mut t = None;
+            for p in self.chunks.iter() {
+                if ptr.as_address() <= p.upper_bound() && ptr.as_address() >= p.lower_bound() {
+                    // we need to copy the data from the &VirtMemoryChunk to a copied VirtMemoryChunk in pp
+                    let pp = VirtMemoryChunk::new(
+                        &mut self.memory.get_mut_data()[p.lower_bound()..p.upper_bound()], 
+                        p.lower_bound(), 
+                        p.upper_bound()
+                    );
+                    t = Some(pp);
+                    break;
+                }
+            }
+            t
+        };
+        if let Some(chunk) = p {
+            // check if the new size is greater than the current size
+            if size > chunk.upper_bound() - chunk.lower_bound() {
+                // allocate a new chunk
+                let new_ptr = self.alloc(size)?;
+                // copy the data from the old chunk to the new chunk
+                for i in 0..size {
+                    let value = unsafe{chunk.read_unchecked(ptr.as_address() + i)};
+                    self.write(&(new_ptr.add(i)), value)?;
+                }
+                // free the old chunk
+                self.free(ptr)?;
+                return Ok(new_ptr);
+            }
+        }
+        Err(format!("Failed to reallocate memory for size => {}", size))
+    }
+
     /// Generally attempts to deallocate a MemoryChunk instance by removing it from the chunks vector.
-    /// BUT this method aims to behave like the free() function in C, so it will NOT accept a Pointer to the chunk to be deallocated.
+    /// BUT this method aims to behave like the free() function in C, so it will NOT accept a Pointer to the chunk to be deallocated
     /// if it doesn't point to the first element of the chunk. (only works if the pointer is the same as what was returned by alloc())
+    /// It also wont zero out the memory, so the data will still be there, but the chunk will be removed from the chunks vector.
     pub fn free<T>(&mut self, ptr: &mut Pointer<T>) -> Result<(), String> {
         for (i, chunk) in self.chunks.iter().enumerate() {
             if ptr.as_address() == chunk.lower_bound() {
@@ -89,7 +136,7 @@ impl Valloc {
     pub fn read<T>(&self, ptr: &Pointer<T>) -> Result<T, String> {
         for chunk in self.chunks.iter() {
             if ptr.as_address() <= chunk.upper_bound() && ptr.as_address() >= chunk.lower_bound() {
-                return chunk.read(ptr.as_address());
+                return Ok(chunk.read(ptr.as_address()));
             }
         }
         Err(format!("Invalid read at address => {}", ptr.as_address()))
@@ -105,7 +152,6 @@ impl Valloc {
     //         return Err(format!("Failed to find allocared memory at => {}", ptr.as_address()));
     //     }
     // }
-
     // pub unsafe fn read_unchecked<T>(&self, ptr: &Pointer<T>) -> Result<T, String> {
     //     let p = self.chunks.iter().find(|mem| {
     //         ptr.as_address() <= mem.upper_bound() && ptr.as_address() >= mem.lower_bound()
@@ -122,7 +168,8 @@ impl Valloc {
     pub fn write<T>(&mut self, ptr: &Pointer<T>, value: T) -> Result<(), String> {
         for chunk in self.chunks.iter_mut() {
             if ptr.as_address() <= chunk.upper_bound() && ptr.as_address() >= chunk.lower_bound() {
-                return chunk.write(ptr.as_address(), value);
+                chunk.write(ptr.as_address(), value);
+                return Ok(());
             }
         }
         Err(format!("Invalid write at address => {}", ptr.as_address()))

@@ -1,3 +1,5 @@
+workspace = { members = ["valloc_test"] }
+
 [package]
 name = "valloc"
 version = "0.1.0"
@@ -5,6 +7,6 @@ edition = "2021"
 
 [lib]
 name = "valloc"
-crate-type = ["staticlib"]
+crate-type = ["rlib"]
 
 [dependencies]
