@@ -115,28 +115,37 @@ impl VirtMemoryChunk {
         self.lower_bound
     }
 
-    /// Read a byte from the memory chunk at the given address
+    // Read a byte from the memory chunk at the given address
     /// may panic if the address is out of bounds
     pub unsafe fn read_unchecked<T>(&self, address: usize) -> T {
-        let data = self.data.add(address);
-        std::mem::transmute::<*mut u8, *mut T>(data).read()
+        let data = self.data.add(address - self.lower_bound) as *const T;
+        std::ptr::read(data)
     }
 
     /// Write a byte to the memory chunk at the given address
     /// may panic if the address is out of bounds
-    pub unsafe fn write_unchecked<T>(&mut self, address: usize, mut value: T) {
-        let value = std::mem::transmute::<*mut T, *mut u8>(&mut value);
-        self.data.add(address).copy_from(value, std::mem::size_of::<T>());
+    pub unsafe fn write_unchecked<T>(&mut self, address: usize, value: T) {
+        let data = self.data.add(address - self.lower_bound) as *mut T;
+        std::ptr::write(data, value);
     }
 
     /// Read a byte from the memory chunk at the given address
-    pub fn read<T>(&self, address: usize) -> T {
-        unsafe { self.read_unchecked(address) }
+    pub fn read<T>(&self, address: usize) -> Result<T, String> {
+        if address >= self.lower_bound && address < self.upper_bound {
+            Ok(unsafe { self.read_unchecked(address) })
+        } else {
+            Err("Out of bounds memory access".to_string())
+        }
     }
 
     /// Write a byte to the memory chunk at the given address
     /// may panic if the address is out of bounds
-    pub fn write<T>(&mut self, address: usize, value: T) {
-        unsafe { self.write_unchecked(address, value); }
+    pub fn write<T>(&mut self, address: usize, value: T) -> Result<(), String> {
+        if address >= self.lower_bound && address <= self.upper_bound {
+            unsafe { self.write_unchecked(address, value) }
+            Ok(())
+        } else {
+            Err(format!("Out of bounds memory access at address => [ {address} ] for chunk with bounds [ {} - {} ]", self.lower_bound, self.upper_bound))
+        }
     }
 }

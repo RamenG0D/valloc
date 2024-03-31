@@ -21,7 +21,6 @@ fn alloc_string() {
     // read the character from our allocated memory
     let mut offset = 0;
     while let Ok(v) = a.read(&ptr.add(offset)) {
-        // let v = a.read(&(ptr.add(o))).unwrap();
         if v == '\0' { break; }
         print!("{}", v);
         offset += 1;

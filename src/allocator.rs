@@ -49,27 +49,21 @@ impl Valloc {
     /// # Note
     /// THIS ALLOCATES IN BYTES!
     pub fn alloc<T>(&mut self, size: usize) -> Result<Pointer<T>, String> {
-        let mut found = false;
-        let mut start = 0;
-        let mut end;
-        for (i, byte) in self.memory.get_data().iter().enumerate() {
-            if *byte == 0 {
-                if !found { start = i; found = true; }
-                
-                end = i;
-                
-                if end - start == size {
-                    self.chunks.push(VirtMemoryChunk::new(
-                        &mut self.memory.get_mut_data()[start..end], 
-                        start, 
-                        end
-                    ));
-                    return Ok(Pointer::new(start));
+        for i in 0..self.memory.get_data().len() {
+            let mut found = true;
+            for chunk in self.chunks.iter() {
+                if i + size > chunk.lower_bound() && i < chunk.upper_bound() {
+                    found = false;
+                    break;
                 }
-            } else {
-                found = false;
+            }
+            if found {
+                let chunk = VirtMemoryChunk::new(&mut self.memory.get_mut_data()[i..i + size], i, i + size);
+                self.chunks.push(chunk);
+                return Ok(Pointer::new(i));
             }
         }
+        
         Err(format!("Failed to allocate memory for size => {}", size))
     }
 
@@ -81,19 +75,18 @@ impl Valloc {
         self.alloc(size * std::mem::size_of::<T>())
     }
 
-    pub fn realloc<T>(&mut self, ptr: &mut Pointer<T>, size: usize) -> Result<Pointer<T>, String> {
+    pub fn realloc<T: std::fmt::Debug>(&mut self, ptr: &mut Pointer<T>, size: usize) -> Result<Pointer<T>, String> {
         // find the chunk that contains the pointer
         let p = {
             let mut t = None;
             for p in self.chunks.iter() {
                 if ptr.as_address() <= p.upper_bound() && ptr.as_address() >= p.lower_bound() {
                     // we need to copy the data from the &VirtMemoryChunk to a copied VirtMemoryChunk in pp
-                    let pp = VirtMemoryChunk::new(
+                    t = Some(VirtMemoryChunk::new(
                         &mut self.memory.get_mut_data()[p.lower_bound()..p.upper_bound()], 
                         p.lower_bound(), 
                         p.upper_bound()
-                    );
-                    t = Some(pp);
+                    ));
                     break;
                 }
             }
@@ -125,7 +118,8 @@ impl Valloc {
         for (i, chunk) in self.chunks.iter().enumerate() {
             if ptr.as_address() == chunk.lower_bound() {
                 self.chunks.remove(i);
-                ptr.set_address(usize::MAX);
+                // NULL's the pointer
+                ptr.set_address(0);
                 return Ok(());
             }
         }
@@ -136,40 +130,18 @@ impl Valloc {
     pub fn read<T>(&self, ptr: &Pointer<T>) -> Result<T, String> {
         for chunk in self.chunks.iter() {
             if ptr.as_address() <= chunk.upper_bound() && ptr.as_address() >= chunk.lower_bound() {
-                return Ok(chunk.read(ptr.as_address()));
+                return chunk.read(ptr.as_address());
             }
         }
         Err(format!("Invalid read at address => {}", ptr.as_address()))
     }
-
-    // pub unsafe fn write_unchecked<T>(&mut self, ptr: &Pointer<T>, value: T) -> Result<(), String> {
-    //     let p = self.chunks.iter_mut().find(|mem| {
-    //         ptr.as_address() <= mem.upper_bound() && ptr.as_address() >= mem.lower_bound()
-    //     });
-    //     if let Some(chunk) = p {
-    //         return Ok( chunk.write_unchecked(ptr.as_address(), value) );
-    //     } else {
-    //         return Err(format!("Failed to find allocared memory at => {}", ptr.as_address()));
-    //     }
-    // }
-    // pub unsafe fn read_unchecked<T>(&self, ptr: &Pointer<T>) -> Result<T, String> {
-    //     let p = self.chunks.iter().find(|mem| {
-    //         ptr.as_address() <= mem.upper_bound() && ptr.as_address() >= mem.lower_bound()
-    //     });
-    //     if let Some(chunk) = p {
-    //         return Ok( chunk.read_unchecked(ptr.as_address()) );
-    //     } else {
-    //         return Err(format!("Failed to find allocared memory at => {}", ptr.as_address()));
-    //     }
-    // }
 
     /// Takes a given Pointer and attempts to find the corresponding MemoryChunk which contains the address (within its range [upper..lower])
     /// and writes the value to the address if found
     pub fn write<T>(&mut self, ptr: &Pointer<T>, value: T) -> Result<(), String> {
         for chunk in self.chunks.iter_mut() {
             if ptr.as_address() <= chunk.upper_bound() && ptr.as_address() >= chunk.lower_bound() {
-                chunk.write(ptr.as_address(), value);
-                return Ok(());
+                return chunk.write(ptr.as_address(), value);
             }
         }
         Err(format!("Invalid write at address => {}", ptr.as_address()))
@@ -179,8 +151,10 @@ impl Valloc {
     /// of course this is checked for bounds
     /// but may be unsafe still
     pub fn write_buffer<T: Clone>(&mut self, ptr: &Pointer<T>, buffer: Vec<T>) -> Result<(), String> {
-        for (i, value) in buffer.iter().enumerate() {
-            self.write(&(ptr.add(i)), value.clone())?;
+        for i in 0..buffer.len() {
+            let p = ptr.add(i);
+            let data = buffer[i].clone();
+            self.write(&p, data)?;
         }
         Ok(())
     }
