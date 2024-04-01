@@ -97,7 +97,8 @@ impl Valloc {
         let p = {
             let mut t = None;
             for p in self.chunks.iter() {
-                if ptr.as_address() <= p.upper_bound() && ptr.as_address() >= p.lower_bound() {
+                let addr = ptr.as_address()?;
+                if addr <= p.upper_bound() && addr >= p.lower_bound() {
                     // we need to copy the data from the &VirtMemoryChunk to a copied VirtMemoryChunk in pp
                     t = Some(VirtMemoryChunk::new(
                         &mut self.memory.get_mut_data()[p.lower_bound()..p.upper_bound()], 
@@ -116,8 +117,8 @@ impl Valloc {
                 let new_ptr = self.alloc(size)?;
                 // copy the data from the old chunk to the new chunk
                 for i in 0..size {
-                    let value = unsafe{chunk.read_unchecked(ptr.as_address() + i)};
-                    self.write(&(new_ptr.add(i)), value)?;
+                    let value = unsafe{chunk.read_unchecked(ptr.as_address()? + i)};
+                    self.write(&(new_ptr.add(i)?), value)?;
                 }
                 // free the old chunk
                 self.free(ptr)?;
@@ -133,35 +134,37 @@ impl Valloc {
     /// It also wont zero out the memory, so the data will still be there, but the chunk will be removed from the chunks vector.
     pub fn free<T>(&mut self, ptr: &mut Pointer<T>) -> Result<(), String> {
         for (i, chunk) in self.chunks.iter().enumerate() {
-            if ptr.as_address() == chunk.lower_bound() {
+            if ptr.as_address()? == chunk.lower_bound() {
                 self.chunks.remove(i);
                 // NULL's the pointer
-                ptr.set_address(0);
+                ptr.set_address(0)?;
                 return Ok(());
             }
         }
-        Err(format!("Invalid free at address => {}", ptr.as_address()))
+        Err(format!("Invalid free at address => {}", ptr.as_address()?))
     }
 
     /// Takes a given Pointer and attempts to find the corresponding MemoryChunk which contains the address (within its range [upper..lower])
     pub fn read<T>(&self, ptr: &Pointer<T>) -> Result<T, String> {
         for chunk in self.chunks.iter() {
-            if ptr.as_address() <= chunk.upper_bound() && ptr.as_address() >= chunk.lower_bound() {
-                return chunk.read(ptr.as_address());
+            let addr = ptr.as_address()?;
+            if addr <= chunk.upper_bound() && addr >= chunk.lower_bound() {
+                return chunk.read(addr);
             }
         }
-        Err(format!("Invalid read at address => {}", ptr.as_address()))
+        Err(format!("Invalid read at address => {}", ptr.as_address()?))
     }
 
     /// Takes a given Pointer and attempts to find the corresponding MemoryChunk which contains the address (within its range [upper..lower])
     /// and writes the value to the address if found
     pub fn write<T>(&mut self, ptr: &Pointer<T>, value: T) -> Result<(), String> {
         for chunk in self.chunks.iter_mut() {
-            if ptr.as_address() <= chunk.upper_bound() && ptr.as_address() >= chunk.lower_bound() {
-                return chunk.write(ptr.as_address(), value);
+            let addr = ptr.as_address()?;
+            if addr <= chunk.upper_bound() && addr >= chunk.lower_bound() {
+                return chunk.write(addr, value);
             }
         }
-        Err(format!("Invalid write at address => {}", ptr.as_address()))
+        Err(format!("Invalid write at address => {}", ptr.as_address()?))
     }
 
     /// QOL function to write a buffer into mem
@@ -169,7 +172,7 @@ impl Valloc {
     /// but may be unsafe still
     pub fn write_buffer<T: Clone>(&mut self, ptr: &Pointer<T>, buffer: Vec<T>) -> Result<(), String> {
         for i in 0..buffer.len() {
-            let p = ptr.add(i);
+            let p = ptr.add(i)?;
             let data = buffer[i].clone();
             self.write(&p, data)?;
         }
@@ -182,7 +185,7 @@ impl Valloc {
     pub fn read_buffer<T: Clone>(&self, ptr: &Pointer<T>, size: usize) -> Result<Vec<T>, String> {
         let mut buffer = Vec::new();
         for i in 0..size {
-            buffer.push(self.read(&(ptr.add(i)))?);
+            buffer.push(self.read(&(ptr.add(i)?))?);
         }
         Ok(buffer)
     }

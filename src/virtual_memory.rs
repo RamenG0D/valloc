@@ -1,5 +1,70 @@
 use std::marker::PhantomData;
-    
+
+pub enum Pointer<T> {
+    Pointer(MemPointer<T>),
+    NULL
+}
+type Result<T> = std::result::Result<T, String>;
+impl<T> Pointer<T> {
+    pub fn new(address: usize) -> Self {
+        Self::Pointer(MemPointer::new(address))
+    }
+
+    fn non_null(&self) -> Result<&MemPointer<T>> {
+        match self {
+            Self::Pointer(ptr) => Ok(ptr),
+            Self::NULL => {
+                Err("Attempted to dereference a NULL pointer".to_string())
+            }
+        }
+    }
+
+    fn mut_non_null(&mut self) -> Result<&mut MemPointer<T>> {
+        match self {
+            Self::Pointer(ptr) => Ok(ptr),
+            Self::NULL => {
+                Err("Attempted to dereference a NULL pointer".to_string())
+            }
+        }
+    }
+
+    pub fn get_value(self) -> Result<MemPointer<T>> {
+        match self {
+            Self::Pointer(ptr) => Ok(ptr),
+            Self::NULL => {
+                Err("Attempted to dereference a NULL pointer".to_string())
+            }
+        }
+    }
+
+    pub fn as_address(&self) -> Result<usize> {
+        let ptr = self.non_null()?;
+        Ok( ptr.as_address() )
+    }
+
+    pub fn set_address(&mut self, address: usize) -> Result<()> {
+        let ptr = self.mut_non_null()?;
+        ptr.set_address(address);
+        Ok(())
+    }
+
+    pub fn cast<U>(self) -> Result<Pointer<U>> {
+        let ptr = self.get_value()?;
+        Ok( Pointer::Pointer(ptr.cast::<U>()) )
+    }
+
+    pub fn add(&self, offset: usize) -> Result<Pointer<T>> {
+        let ptr = self.non_null()?;
+        Ok( Pointer::Pointer(ptr.add(offset)) )
+    }
+
+    pub fn sub(&self, offset: usize) -> Result<Pointer<T>> {
+        let ptr = self.non_null()?;
+        Ok( Pointer::Pointer(ptr.sub(offset)) )
+    }
+
+}
+
 /// The Pointer type represents a pointer to a memory address
 /// It also contricts the type of the data that is being pointed to to its Generic allowing for type safety.
 /// 
@@ -8,40 +73,40 @@ use std::marker::PhantomData;
 /// elsewhere to ensure that the data being read/written correctly and the methods wont except invalid combonations pointers
 /// and data types into methods that could cause undefined behavior.
 #[derive(Debug, Clone, Copy)]
-pub struct Pointer<Type> {
+pub struct MemPointer<Type> {
     address: usize,
     _phantom: PhantomData<Type>
 }
-impl<Type> Pointer<Type> {
-    pub fn new(address: usize) -> Self {
+impl<Type> MemPointer<Type> {
+    pub(self) fn new(address: usize) -> Self {
         Self { address, _phantom: PhantomData }
     }
 
     #[inline(always)]
-    pub fn as_address(&self) -> usize {
+    pub(self) fn as_address(&self) -> usize {
         self.address
     }
 
     #[inline(always)]
-    pub fn set_address(&mut self, address: usize) {
+    pub(self) fn set_address(&mut self, address: usize) {
         self.address = address;
     }
 
     #[inline(always)]
-    pub fn cast<T>(&self) -> Pointer<T> {
-        Pointer::new(self.address)
+    pub(self) fn cast<T>(self) -> MemPointer<T> {
+        MemPointer::new(self.address)
     }
 
     #[inline(always)]
-    pub fn add(&self, offset: usize) -> Pointer<Type> {
+    pub(self) fn add(&self, offset: usize) -> MemPointer<Type> {
         let offset = offset * std::mem::size_of::<Type>();
-        Pointer::new(self.address + offset)
+        MemPointer::new(self.address + offset)
     }
 
     #[inline(always)]
-    pub fn sub(&self, offset: usize) -> Pointer<Type> {
+    pub(self) fn sub(&self, offset: usize) -> MemPointer<Type> {
         let offset = offset * std::mem::size_of::<Type>();
-        Pointer::new(self.address - offset)
+        MemPointer::new(self.address - offset)
     }
 }
 
@@ -118,29 +183,33 @@ impl VirtMemoryChunk {
     // Read a byte from the memory chunk at the given address
     /// may panic if the address is out of bounds
     pub unsafe fn read_unchecked<T>(&self, address: usize) -> T {
-        let data = self.data.add(address - self.lower_bound) as *const T;
-        std::ptr::read(data)
+        let address = address + std::mem::size_of::<T>();
+        let data = self.data.add(address) as *const T;
+        data.read()
     }
 
     /// Write a byte to the memory chunk at the given address
     /// may panic if the address is out of bounds
     pub unsafe fn write_unchecked<T>(&mut self, address: usize, value: T) {
-        let data = self.data.add(address - self.lower_bound) as *mut T;
-        std::ptr::write(data, value);
+        let address = address + std::mem::size_of::<T>();
+        let data = self.data.add(
+            address
+        ) as *mut T;
+        data.write(value);
     }
 
     /// Read a byte from the memory chunk at the given address
-    pub fn read<T>(&self, address: usize) -> Result<T, String> {
-        if address >= self.lower_bound && address < self.upper_bound {
+    pub fn read<T>(&self, address: usize) -> Result<T> {
+        if address >= self.lower_bound && address <= self.upper_bound {
             Ok(unsafe { self.read_unchecked(address) })
         } else {
-            Err("Out of bounds memory access".to_string())
+            Err(format!("Out of bounds memory access at address => [ {address} ] for chunk with bounds [ {} - {} ]", self.lower_bound, self.upper_bound))
         }
     }
 
     /// Write a byte to the memory chunk at the given address
     /// may panic if the address is out of bounds
-    pub fn write<T>(&mut self, address: usize, value: T) -> Result<(), String> {
+    pub fn write<T>(&mut self, address: usize, value: T) -> Result<()> {
         if address >= self.lower_bound && address <= self.upper_bound {
             unsafe { self.write_unchecked(address, value) }
             Ok(())
