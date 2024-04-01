@@ -6,23 +6,22 @@ fn alloc_string() {
 
     // allocate space (in bytes) for a character
     // NOTE! 
-    let mut ptr = a.alloc_type::<char>(6).unwrap();
-    // other method (slightly more annoying)
+    let mut ptr = a.alloc_type::<u8>(6).unwrap();
+    // this is the other method (slightly more annoying) to write to the memory (individual bytes)
     /* write the character 'H' to our allocated memory
-     * kernel.write(&ptr, 'H').unwrap();
+     * kernel.write(&ptr,          'H').unwrap();
      * kernel.write(&(ptr.add(1)), 'e').unwrap();
      * kernel.write(&(ptr.add(2)), 'l').unwrap();
      * kernel.write(&(ptr.add(3)), 'l').unwrap();
      * kernel.write(&(ptr.add(4)), 'o').unwrap();
      */
-    let text = b"Hello\0".iter().map(|&x| x as char).collect::<Vec<char>>();
+    let text = b"Hello".iter().map(|&x| x).collect::<Vec<u8>>();
     a.write_buffer(&ptr, text).unwrap();
 
     // read the character from our allocated memory
     let mut offset = 0;
     while let Ok(v) = a.read(&ptr.add(offset)) {
-        if v == '\0' { break; }
-        print!("{}", v);
+        print!("{}", v as char);
         offset += 1;
     }
     println!();
