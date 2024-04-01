@@ -49,19 +49,36 @@ impl Valloc {
     /// # Note
     /// THIS ALLOCATES IN BYTES!
     pub fn alloc<T>(&mut self, size: usize) -> Result<Pointer<T>, String> {
-        for i in 0..self.memory.get_data().len() {
-            let mut found = true;
-            for chunk in self.chunks.iter() {
-                if i + size > chunk.lower_bound() && i < chunk.upper_bound() {
-                    found = false;
-                    break;
-                }
+        if size == 0 { return Err("Cannot allocate 0 bytes".to_string()); }
+        let size = size - 1;
+
+        for (i, data) in self.memory.get_data().iter().enumerate() {
+            if *data != 0 { continue; }
+            let (start, end) = (i, i + size);
+
+            // skip if chunk is already allocated
+            if self.chunks.iter().any(|chunk| {
+                let lower = chunk.lower_bound();
+                let upper = chunk.upper_bound();
+                start >= lower && start <= upper || 
+                end >= lower && end <= upper
+            }) {
+                continue;
             }
-            if found {
-                let chunk = VirtMemoryChunk::new(&mut self.memory.get_mut_data()[i..i + size], i, i + size);
-                self.chunks.push(chunk);
-                return Ok(Pointer::new(i));
+
+            // check if we have enough space to allocate
+            if end >= self.memory.get_data().len() {
+                return Err(format!("Failed to allocate memory for size => {size}"));
             }
+
+            // create a new chunk
+            let chunk = VirtMemoryChunk::new(
+                &mut self.memory.get_mut_data()[start..start + size], 
+                start, 
+                start + size
+            );
+            self.chunks.push(chunk);
+            return Ok(Pointer::new(start));
         }
         
         Err(format!("Failed to allocate memory for size => {}", size))
