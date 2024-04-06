@@ -1,6 +1,22 @@
 use crate::{allocator::Valloc, virtual_memory::Pointer};
 
 #[test]
+fn alloc_u8() {
+    let mut a = Valloc::new(1024);
+
+    // allocate space (in bytes) for a character
+    let mut ptr = a.alloc::<u8>(1).unwrap();
+
+    // write the character 'H' to our allocated memory
+    *ptr = 'H' as u8;
+
+    // read the character from our allocated memory
+    assert_eq!(*ptr, 'H' as u8);
+
+    a.free(&mut ptr).unwrap();
+}
+
+#[test]
 fn alloc_string() {
     let mut a = Valloc::new(1024);
 
@@ -20,16 +36,16 @@ fn alloc_string() {
 
     // read the character from our allocated memory
     let mut offset = 0;
-    while let Ok(v) = a.read(&ptr.add(offset).unwrap()) {
+    while let Ok(v) = a.read(&ptr.add(offset)) {
         print!("{}", v as char);
         offset += 1;
     }
     println!();
 
     // test if reading from a pointer that is out of bounds will return an error
-    let result = a.read(&ptr.add(10).unwrap());
+    let result = a.read(&ptr.add(10));
     if let Err(e) = result {
-        println!("EXPECTED ERROR: {}", e);
+        println!("error that we expected => {}", e);
     } else {
         eprintln!("Expected an out of bounds error!");
         assert!(false);
@@ -41,17 +57,17 @@ fn alloc_string() {
 #[test]
 fn alloc_struct() {
     // custom struct to test with
-    struct Test { a: u32, b: u32 }
-    
+    struct Test { a: u32, b: u32, z: u32 }
     let mut a = Valloc::new(1024);
     
     let mut ptr = a.alloc_type(1).unwrap();
 
-    a.write(&ptr, Test { a: 10, b: 20 }).unwrap();
-    let value = a.read(&ptr).unwrap();
+    // write the struct to our allocated memory
+    *ptr = Test { a: 10, b: 20, z: 30 };
 
-    assert_eq!(value.a, 10);
-    assert_eq!(value.b, 20);
+    assert_eq!(ptr.a, 10);
+    assert_eq!(ptr.b, 20);
+    assert_eq!(ptr.z, 30);
     
     a.free(&mut ptr).unwrap();
 }
@@ -114,8 +130,6 @@ fn ptr_null() {
         eprintln!("Expected an double free error!");
         assert!(false);
     }
-
-    let _ = a.read(&ptr).unwrap();
 }
 
 #[test]
@@ -127,7 +141,7 @@ fn ptr_cast() {
     let before = a.read(&ptr).unwrap();
 
     // cast the pointer to a different type
-    let mut ptr = ptr.cast::<u32>().unwrap();
+    let mut ptr = ptr.cast::<u32>();
 
     // read from the pointer
     let after = a.read(&ptr).unwrap();
