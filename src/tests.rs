@@ -23,29 +23,20 @@ fn alloc_string() {
     // allocate space (in bytes) for a character
     // NOTE! 
     let mut ptr = a.alloc_type::<u8>(6).unwrap();
-    // this is the other method (slightly more annoying) to write to the memory (individual bytes)
-    /* write the character 'H' to our allocated memory
-     * kernel.write(&ptr,          'H').unwrap();
-     * kernel.write(&(ptr.add(1)), 'e').unwrap();
-     * kernel.write(&(ptr.add(2)), 'l').unwrap();
-     * kernel.write(&(ptr.add(3)), 'l').unwrap();
-     * kernel.write(&(ptr.add(4)), 'o').unwrap();
-     */
+    
     let text = b"Hello".iter().map(|&x| x).collect::<Vec<u8>>();
+    let len = text.len();
+
     a.write_buffer(&ptr, text).unwrap();
 
-    // read the character from our allocated memory
-    let mut offset = 0;
-    while let Ok(v) = a.read(&ptr.add(offset)) {
-        print!("{}", v as char);
-        offset += 1;
-    }
-    println!();
+    let text = a.read_buffer(&ptr, len).unwrap();
+    let text = text.iter().map(|c| *c as char).collect::<Vec<char>>();
+    text.iter().for_each(|t| print!("{t}")); println!();
 
     // test if reading from a pointer that is out of bounds will return an error
     let result = a.read(&ptr.add(10));
     if let Err(e) = result {
-        println!("error that we expected => {}", e);
+        println!("error that we expected: {}", e);
     } else {
         eprintln!("Expected an out of bounds error!");
         assert!(false);
@@ -141,7 +132,7 @@ fn ptr_cast() {
     let before = a.read(&ptr).unwrap();
 
     // cast the pointer to a different type
-    let mut ptr = ptr.cast::<u32>();
+    let mut ptr = ptr.cast::<u32>().unwrap();
 
     // read from the pointer
     let after = a.read(&ptr).unwrap();

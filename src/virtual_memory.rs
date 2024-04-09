@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::{Deref, DerefMut}};
+use std::ops::{Deref, DerefMut};
 
 /// The Pointer type represents a pointer to a memory address
 /// It also contricts the type of the data that is being pointed to to its Generic allowing for type safety.
@@ -10,9 +10,10 @@ use std::{marker::PhantomData, ops::{Deref, DerefMut}};
 #[derive(Debug, Clone, Copy)]
 pub enum Pointer<T> {
     Pointer {
-        address: usize,
-        phantom: PhantomData<T>,
-        chunk: Option<*const VirtMemoryChunk>
+        address: Option<*mut T>,
+        index: usize,
+        // phantom: PhantomData<T>,
+        // chunk: Option<*const VirtMemoryChunk>
     },
     NULL
 }
@@ -21,64 +22,72 @@ impl<T> Deref for Pointer<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        let addr = self.address().unwrap();
-        let chunk = self.chunk().unwrap();
-        unsafe { (*chunk).read_ref(addr).unwrap() }
+        unsafe { self.address().unwrap().as_ref().unwrap() }
     }
 }
 
 impl<T> DerefMut for Pointer<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        let addr = self.address().unwrap();
-        let chunk = self.chunk().unwrap();
-        unsafe { (*chunk).read_mut(addr).unwrap() }
+        unsafe { self.address().unwrap().as_mut().unwrap() }
     }
 }
 
 impl<T> Pointer<T> {
-    pub fn new(address: usize, chunk: *const VirtMemoryChunk) -> Self {
-        Pointer::Pointer { address, phantom: PhantomData, chunk: Some(chunk) }
+    pub fn from_index(index: usize) -> Self {
+        Pointer::Pointer { address: None, index }
     }
 
-    pub fn from_address(address: usize) -> Self {
-        Pointer::Pointer { address, phantom: PhantomData, chunk: None }
+    pub fn new(address: *mut T, index: usize) -> Self {
+        Pointer::Pointer { address: Some(address), index }
     }
 
-    #[inline(always)]
-    pub fn address(&self) -> Result<usize, String> {
+    #[inline]
+    pub fn address(&self) -> Result<*mut T, String> {
         match self {
-            Pointer::Pointer { address, .. } => Ok(*address),
+            Pointer::Pointer { address, .. } => {
+                Ok(address.unwrap())
+            },
             Pointer::NULL => Err("Attempted to get the address of a NULL pointer".to_string())
         }
     }
 
     #[inline(always)]
-    pub fn cast<N>(self) -> Pointer<N> {
-        Pointer::Pointer { address: self.address().unwrap(), phantom: PhantomData, chunk: None }
-    }
-
-    #[inline(always)]
-    pub fn chunk(&self) -> Result<*const VirtMemoryChunk, String> {
+    pub fn cast<N>(self) -> Result<Pointer<N>, String> {
         match self {
-            Pointer::Pointer { chunk, .. } => Ok(chunk.unwrap()),
-            Pointer::NULL => Err("Attempted to get the chunk of a NULL pointer".to_string())
+            Pointer::Pointer { address, index } => {
+                Ok(Pointer::Pointer { address: address.map(|addr| addr as *mut N), index })
+            },
+            Pointer::NULL => Err("Attempted to cast a NULL pointer".to_string())
         }
     }
 
-    #[inline(always)]
+    pub fn index(&self) -> Result<usize, String> {
+        match self {
+            Pointer::Pointer { index, .. } => Ok(*index),
+            Pointer::NULL => Err("Attempted to get the index of a NULL pointer".to_string())
+        }
+    }
+
+    #[inline]
     pub fn add(&self, offset: usize) -> Pointer<T> {
         let offset = offset * std::mem::size_of::<T>();
         let addr = self.address().unwrap();
-        let chunk = self.chunk().unwrap();
-        Pointer::new(addr + offset, chunk)
+
+        Pointer::new(
+            addr.wrapping_add(offset), 
+            self.index().unwrap() + offset
+        )
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn sub(&self, offset: usize) -> Pointer<T> {
         let offset = offset * std::mem::size_of::<T>();
         let addr = self.address().unwrap();
-        let chunk = self.chunk().unwrap();
-        Pointer::new(addr - offset, chunk)
+
+        Pointer::new(
+            addr.wrapping_sub(offset), 
+            self.index().unwrap() - offset
+        )
     }
 }
 
@@ -141,15 +150,20 @@ impl VirtMemoryChunk {
     }
 
     /// Get the upper bound of the chunk
-    #[inline(always)]
+    #[inline]
     pub fn upper_bound(&self) -> usize {
         self.upper_bound
     }
 
     /// Get the lower bound of the chunk
-    #[inline(always)]
+    #[inline]
     pub fn lower_bound(&self) -> usize {
         self.lower_bound
+    }
+
+    #[inline]
+    pub fn data(&self) -> *mut u8 {
+        self.data
     }
     
     pub unsafe fn read_ref<T>(&self, address: usize) -> Result<&T, String> {
