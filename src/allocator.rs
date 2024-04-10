@@ -58,6 +58,10 @@ impl Valloc {
         &self.memory
     }
 
+    pub fn chunks(&self) -> &Vec<VirtMemoryChunk> {
+        &self.chunks
+    }
+
     /// Allocates a new MemoryChunk instance, checking if there is enough CONTIGUOUS space in the memory to allocate the chunk.
     /// If there is enough space, it will create a new MemoryChunk instance and add it to the chunks vector.
     /// Returns a Pointer to the start of the chunk if successful, otherwise returns an error message.
@@ -65,7 +69,11 @@ impl Valloc {
     /// # Note
     /// THIS ALLOCATES IN BYTES!
     pub fn alloc<T>(&mut self, size: usize) -> Result<Pointer<T>, String> {
-        let size = if size == 0 { return Err("Cannot allocate 0 bytes".to_string()); } else if size == 1 { size } else { size - 1 };
+        let size = match size {
+            0 => return Err("Cannot allocate 0 bytes".to_string()),
+            1 => size,
+            _ => size - 1
+        };
 
         for (i, data) in self.memory.get_data().iter().enumerate() {
             if *data != 0 { continue; }
@@ -81,34 +89,21 @@ impl Valloc {
                 continue;
             }
 
-            // check if we have enough space to allocate
-            if end >= self.memory.get_data().len() {
-                return Err(format!("Failed to allocate memory for size => {size}"));
-            }
-
             let m = self.memory.get_data().as_mut();
-            //self.memory.get_mut_data().borrow();
-            let ptr = &mut m[start..start + size];
 
             // create a new chunk
             let chunk = VirtMemoryChunk::new(
-                ptr, 
+                &mut m[start..end], 
                 start, 
-                start + size
+                end
             );
             self.chunks.push(chunk);
 
-            let ptr = unsafe{ std::mem::transmute::<&mut [u8], &mut [T]>(ptr) };
-
-            // let plen = ptr.len();
-            // let p = ptr.as_mut_ptr() as *mut T;
-            // let ptr = unsafe{ std::slice::from_raw_parts_mut(p, plen) };
-            // let ptr = unsafe{ Box::from_raw(ptr) };
-
+            let ptr = unsafe{ std::mem::transmute::<&mut [u8], &mut [T]>(&mut m[start..end]) };
             return Ok(Pointer::new(ptr, start));
         }
         
-        Err(format!("Failed to allocate memory for size => {}", size))
+        Err(format!("Failed to allocate memory for size => {size}"))
     }
 
     pub fn alloc_type<T>(&mut self, size: usize) -> Result<Pointer<T>, String> {
@@ -120,7 +115,7 @@ impl Valloc {
     }
 
     pub fn realloc<T>(&mut self, ptr: Pointer<T>, new_size: usize) -> Result<Pointer<T>, String> 
-        // where T: std::fmt::Debug
+        where T: std::fmt::Debug
     {
         realloc(self, ptr, new_size)
     }
@@ -134,14 +129,19 @@ impl Valloc {
     }
 
     /// Takes a given Pointer and attempts to find the corresponding MemoryChunk which contains the address (within its range [upper..lower])
-    pub fn read<T>(&self, ptr: &Pointer<T>) -> Result<T, String> {
+    pub fn read<T>(&self, ptr: &Pointer<T>) -> Result<T, String> 
+        where T: std::fmt::Debug
+    {
         let addr = ptr.index()?;
         if let Some(chunk) = self.chunks.iter().find(move |chunk| {
             addr <= chunk.upper_bound() && addr >= chunk.lower_bound()
         }) {
+            println!("YEP, we expect to be here => {addr}");
             return Ok(unsafe{chunk.read_unchecked(addr)});
+        } else {
+            println!("THE FUCK! HOW CAN YOU DO BOTH! => addr: {addr}");
+            Err(format!("Invalid read at address => {}", addr))
         }
-        Err(format!("Invalid read at address => {}", addr))
     }
 
     /// Takes a given Pointer and attempts to find the corresponding MemoryChunk which contains the address (within its range [upper..lower])
@@ -172,7 +172,9 @@ impl Valloc {
     /// QOL function to read a buffer from mem
     /// of course this is checked for bounds
     /// but may be unsafe still
-    pub fn read_buffer<T>(&self, ptr: &Pointer<T>, size: usize) -> Result<Vec<T>, String> {
+    pub fn read_buffer<T>(&self, ptr: &Pointer<T>, size: usize) -> Result<Vec<T>, String> 
+        where T: std::fmt::Debug
+    {
         let mut buffer = Vec::new();
         for i in 0..size {
             buffer.push(
@@ -192,18 +194,21 @@ pub fn free<T>(vallocator: &mut Valloc, ptr: &mut Pointer<T>) -> Result<(), Stri
     if vallocator.chunks.iter().find(|chunk| {
         addr <= chunk.upper_bound() && addr >= chunk.lower_bound()
     }).is_none() {
-        return Err(format!("Failed to free memory at address => {}", addr));
+        return Err(format!("Failed to free memory at address => {addr}"));
     }
 
     // find the chunk that contains the pointer
     vallocator.chunks.retain(|chunk| {
-        if addr <= chunk.upper_bound() && addr >= chunk.lower_bound() { false } else { true }
+        !(addr <= chunk.upper_bound()) && 
+        !(addr >= chunk.lower_bound())
     });
 
     Ok(())
 }
 
-pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) -> Result<Pointer<T>, String> {
+pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) -> Result<Pointer<T>, String> 
+    where T: std::fmt::Debug
+{
     // check if the new size is 0
     if nsize == 0 { return Err("Cannot reallocate 0 bytes".to_string()); }
     // if the size is greater than the current amount of memory left
@@ -212,12 +217,12 @@ pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) ->
     }
     // if new size is the same as the current size
     if nsize == ptr.address().unwrap().len() {
+        println!("Returned same ptr");
         return Ok(ptr);
     }
 
     // get the address (index in valloc memory) of the pointer
     let addr = ptr.index()?;
-
     // find the chunk that contains the pointer
     if let Some(chunk) = vallocator.chunks.iter_mut().find(move |chunk| {
         addr <= chunk.upper_bound() && addr >= chunk.lower_bound()
@@ -234,10 +239,9 @@ pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) ->
             // and return the same pointer
             let diff = chunk_size - nsize;
             let (nchunk, nptr) = if diff > 0 {
-                // let mut ptr: Box<[u8]> = TryInto::<BoxValue<[u8]>>::try_into(&mut vallocator.memory.get_data()[chunk.lower_bound()..chunk.lower_bound() + nsize]).unwrap().into();
-                // let mem_ptr = &mut vallocator.memory.get_data()[chunk.lower_bound()..chunk.lower_bound() + nsize];
-                // let ptr = unsafe{ std::mem::transmute::<&mut [u8], &mut [T]>() };
-                let mut nptr = ptr.address_mut().expect("Failed to get the address of the pointer!");
+                // let addr = ptr.address_mut().expect("Failed to get the address of the pointer").as_ptr() as usize;
+                let nptr = &mut vallocator.memory.get_data()[chunk.lower_bound()..chunk.lower_bound() + nsize];
+                let nptr = unsafe{ std::mem::transmute::<&mut [u8], &mut [T]>(nptr) };
                 
                 (
                     Some(VirtMemoryChunk::new(
@@ -245,29 +249,23 @@ pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) ->
                         chunk.lower_bound(), 
                         chunk.lower_bound() + nsize
                     )),
-                    Some(Pointer::new(
-                        &mut nptr, 
-                        chunk.lower_bound()
-                    ))
+                    Some(Pointer::new(nptr, chunk.lower_bound()))
                 )
             } else {
                 (None, None)
             };
+            
+            // get data from the old buffer
+            let data = vallocator.read_buffer(&ptr, diff)?;
+
+            // free old ptr
+            vallocator.free(&mut ptr)?;
 
             if let Some(nchunk) = nchunk {
                 vallocator.chunks.push(nchunk);
             } else {
                 return Err(format!("Failed to reallocate memory: New size is greater than the current size"));
             }
-            
-            // get data from the old buffer
-            let data = vallocator.read_buffer(&ptr, diff)?;
-
-            // remove old chunk
-            vallocator.chunks.retain(|c| {
-                chunk.lower_bound() != c.lower_bound() && 
-                chunk.upper_bound() != c.upper_bound()
-            });
             
             if let Some(ptr) = nptr {
                 // write into new buffer
@@ -279,22 +277,20 @@ pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) ->
         }
         
         // allocate a spcae the size of our current chunk size + the new chunk size
-        let mut new_ptr: Pointer<T> = vallocator.alloc(chunk_size + nsize)?;
-        dbg!(chunk_size);
-        dbg!(chunk_size + nsize);
+        let mut new_ptr: Pointer<T> = vallocator.alloc(nsize)?;
+        
+        dbg!(chunk_size); dbg!(nsize);
         println!("Ptr {{ address: {:?}, index: {}, len {} }}", ptr.address().unwrap().as_ptr(), ptr.index().unwrap(), ptr.address().unwrap().len());
-        println!("New Ptr {{ address: {:?}, index: {}, len: {} }}", new_ptr.address().unwrap().as_ptr(), new_ptr.index().unwrap(), ptr.address().unwrap().len());
+        println!("New Ptr {{ address: {:?}, index: {}, len: {} }}", new_ptr.address().unwrap().as_ptr(), new_ptr.index().unwrap(), new_ptr.address().unwrap().len());
+        
         // read the data from the old ptr (store it to put it in the new ptr)
         let data = vallocator.read_buffer(&ptr, chunk_size)?;
+
         // write the data to the new ptr
         vallocator.write_buffer(&mut new_ptr, data)?;
 
         // free the old ptr (Note: this does NOT zero out the memory, it just removes the chunk from the chunks vector, see free() for more on this)
         vallocator.free(&mut ptr)?;
-
-        vallocator.chunks.retain(|c| {
-            if chunk.lower_bound() == c.lower_bound() && chunk.upper_bound() == c.upper_bound() { false } else { true }
-        });
         
         // were done return the new ptr
         return Ok(new_ptr);

@@ -21,8 +21,9 @@ impl<T> Deref for Pointer<T> {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            Pointer::Pointer { address, .. } => {
-                unsafe{(*address).as_ref()}.unwrap().get(0).expect("Failed to dereference the pointer!")
+            Pointer::Pointer { address, index } => {
+                let address = address.to_owned();
+                unsafe{(*address).as_ref()}.get(*index).expect("Failed to get the value of the pointer!")
             },
             Pointer::NULL => panic!("Attempted to dereference a NULL pointer")
         }
@@ -32,8 +33,8 @@ impl<T> Deref for Pointer<T> {
 impl<T> DerefMut for Pointer<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            Pointer::Pointer { address, .. } => {
-                unsafe{(*address).as_mut()}.unwrap().get_mut(0).expect("Failed to dereference the pointer!")
+            Pointer::Pointer { address, index } => {
+                unsafe{(**address).as_mut()}.get_mut(*index).expect("Failed to get the value of the pointer!")
             },
             Pointer::NULL => panic!("Attempted to dereference a NULL pointer")
         }
@@ -70,7 +71,7 @@ impl<T> Pointer<T> {
     pub fn cast<N>(self) -> Result<Pointer<N>, String> {
         match self {
             Pointer::Pointer { address, index } => {
-                let addr = unsafe{(*address).as_mut()}.as_mut_ptr() as *mut N;
+                let addr = unsafe{ (*address).as_mut() }.as_mut_ptr() as *mut N;
                 let addr = unsafe { std::slice::from_raw_parts_mut(addr, (*address).len()) };
                 Ok(Pointer::new(addr, index))
             },
@@ -80,34 +81,30 @@ impl<T> Pointer<T> {
 
     #[inline]
     pub fn add(&self, offset: usize) -> Pointer<T> {
-        let offset = offset * std::mem::size_of::<T>();
-        let (addr, index) = (
-            self.address().expect("Failed to get the address of the pointer!"),
-            self.index().expect("Failed to get the index of the pointer!")
-        );
+        let index = match self {
+            Pointer::Pointer { index, .. } => index + offset,
+            Pointer::NULL => 0
+        };
+        
+        let address = self.address().unwrap();
+        let address = address as *const [T];
+        let address = address.cast_mut();
 
-        let alen = addr.len();
-        let addr = addr.as_ptr();
-        let new_addr = addr.wrapping_add(offset);
-        let new_addr = unsafe { std::slice::from_raw_parts_mut(new_addr as *mut T, alen) };
-
-        Pointer::new(new_addr, index.wrapping_add(offset))
+        Pointer::Pointer { address, index }
     }
 
     #[inline]
     pub fn sub(&self, offset: usize) -> Pointer<T> {
-        let offset = offset * std::mem::size_of::<T>();
-        let (addr, index) = (
-            self.address().expect("Failed to get the address of the pointer!"),
-            self.index().expect("Failed to get the index of the pointer!")
-        );
+        let index = match self {
+            Pointer::Pointer { index, .. } => index - offset,
+            Pointer::NULL => 0
+        };
+        
+        let address = self.address().unwrap();
+        let address = address as *const [T];
+        let address = address.cast_mut();
 
-        let alen = addr.len();
-        let addr = addr.as_ptr();
-        let new_addr = addr.wrapping_sub(offset);
-        let new_addr = unsafe { std::slice::from_raw_parts_mut(new_addr as *mut T, alen) };
-
-        Pointer::new(new_addr, index.wrapping_sub(offset))
+        Pointer::Pointer { address, index }
     }
 }
 
@@ -198,9 +195,10 @@ impl VirtMemoryChunk {
 
     // Read a byte from the memory chunk at the given address
     /// may panic b/c bounds checking is not done
-    pub unsafe fn read_unchecked<T>(&self, address: usize) -> T {
+    pub unsafe fn read_unchecked<T: std::fmt::Debug>(&self, address: usize) -> T {
         let address = address * std::mem::size_of::<T>();
         let data = self.data.add(address) as *const T;
+        dbg!(data.read());
         data.read()
     }
 
@@ -212,11 +210,13 @@ impl VirtMemoryChunk {
             address
         ) as *mut T;
         
-        *data = value;
+        data.write(value);
     }
 
     /// Read a byte from the memory chunk at the given address
-    pub fn read<T>(&self, address: usize) -> Result<T, String> {
+    pub fn read<T>(&self, address: usize) -> Result<T, String> 
+        where T: std::fmt::Debug
+    {
         if address >= self.lower_bound && address <= self.upper_bound {
             Ok(unsafe { self.read_unchecked(address) })
         } else {
