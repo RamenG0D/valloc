@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut};
+use std::{cell::RefCell, ops::{Deref, DerefMut}, usize};
 
 /// The Pointer type represents a pointer to a memory address
 /// It also contricts the type of the data that is being pointed to to its Generic allowing for type safety.
@@ -7,13 +7,11 @@ use std::ops::{Deref, DerefMut};
 /// But it does NOT store the actual value of the data, it just tells the Pointer what the data is and its also used
 /// elsewhere to ensure that the data being read/written correctly and the methods wont except invalid combonations pointers
 /// and data types into methods that could cause undefined behavior.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum Pointer<T> {
     Pointer {
-        address: Option<*mut T>,
-        index: usize,
-        // phantom: PhantomData<T>,
-        // chunk: Option<*const VirtMemoryChunk>
+        address: *mut [T],
+        index: usize
     },
     NULL
 }
@@ -22,45 +20,45 @@ impl<T> Deref for Pointer<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { self.address().unwrap().as_ref().unwrap() }
+        match self {
+            Pointer::Pointer { address, .. } => {
+                unsafe{(*address).as_ref()}.unwrap().get(0).expect("Failed to dereference the pointer!")
+            },
+            Pointer::NULL => panic!("Attempted to dereference a NULL pointer")
+        }
     }
 }
 
 impl<T> DerefMut for Pointer<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.address().unwrap().as_mut().unwrap() }
+        match self {
+            Pointer::Pointer { address, .. } => {
+                unsafe{(*address).as_mut()}.unwrap().get_mut(0).expect("Failed to dereference the pointer!")
+            },
+            Pointer::NULL => panic!("Attempted to dereference a NULL pointer")
+        }
     }
 }
 
 impl<T> Pointer<T> {
-    pub fn from_index(index: usize) -> Self {
-        Pointer::Pointer { address: None, index }
+    pub fn new(address: &mut [T], index: usize) -> Self {
+        Pointer::Pointer { address, index }
     }
 
-    pub fn new(address: *mut T, index: usize) -> Self {
-        Pointer::Pointer { address: Some(address), index }
-    }
-
-    #[inline]
-    pub fn address(&self) -> Result<*mut T, String> {
+    pub fn address(&self) -> Result<&[T], String> {
         match self {
-            Pointer::Pointer { address, .. } => {
-                Ok(address.unwrap())
-            },
+            Pointer::Pointer { address, .. } => Ok(unsafe{(*address).as_ref()}.unwrap()),
             Pointer::NULL => Err("Attempted to get the address of a NULL pointer".to_string())
         }
     }
 
-    #[inline(always)]
-    pub fn cast<N>(self) -> Result<Pointer<N>, String> {
+    pub fn address_mut(&mut self) -> Result<&mut [T], String> {
         match self {
-            Pointer::Pointer { address, index } => {
-                Ok(Pointer::Pointer { address: address.map(|addr| addr as *mut N), index })
-            },
-            Pointer::NULL => Err("Attempted to cast a NULL pointer".to_string())
+            Pointer::Pointer { address, .. } => Ok(unsafe{(*address).as_mut()}.unwrap()),
+            Pointer::NULL => Err("Attempted to get the address of a NULL pointer".to_string())
         }
     }
-
+    
     pub fn index(&self) -> Result<usize, String> {
         match self {
             Pointer::Pointer { index, .. } => Ok(*index),
@@ -68,26 +66,48 @@ impl<T> Pointer<T> {
         }
     }
 
+    #[inline(always)]
+    pub fn cast<N>(self) -> Result<Pointer<N>, String> {
+        match self {
+            Pointer::Pointer { address, index } => {
+                let addr = unsafe{(*address).as_mut()}.as_mut_ptr() as *mut N;
+                let addr = unsafe { std::slice::from_raw_parts_mut(addr, (*address).len()) };
+                Ok(Pointer::new(addr, index))
+            },
+            Pointer::NULL => Err("Attempted to cast a NULL pointer".to_string())
+        }
+    }
+
     #[inline]
     pub fn add(&self, offset: usize) -> Pointer<T> {
         let offset = offset * std::mem::size_of::<T>();
-        let addr = self.address().unwrap();
+        let (addr, index) = (
+            self.address().expect("Failed to get the address of the pointer!"),
+            self.index().expect("Failed to get the index of the pointer!")
+        );
 
-        Pointer::new(
-            addr.wrapping_add(offset), 
-            self.index().unwrap() + offset
-        )
+        let alen = addr.len();
+        let addr = addr.as_ptr();
+        let new_addr = addr.wrapping_add(offset);
+        let new_addr = unsafe { std::slice::from_raw_parts_mut(new_addr as *mut T, alen) };
+
+        Pointer::new(new_addr, index.wrapping_add(offset))
     }
 
     #[inline]
     pub fn sub(&self, offset: usize) -> Pointer<T> {
         let offset = offset * std::mem::size_of::<T>();
-        let addr = self.address().unwrap();
+        let (addr, index) = (
+            self.address().expect("Failed to get the address of the pointer!"),
+            self.index().expect("Failed to get the index of the pointer!")
+        );
 
-        Pointer::new(
-            addr.wrapping_sub(offset), 
-            self.index().unwrap() - offset
-        )
+        let alen = addr.len();
+        let addr = addr.as_ptr();
+        let new_addr = addr.wrapping_sub(offset);
+        let new_addr = unsafe { std::slice::from_raw_parts_mut(new_addr as *mut T, alen) };
+
+        Pointer::new(new_addr, index.wrapping_sub(offset))
     }
 }
 
@@ -98,31 +118,23 @@ impl<T> Pointer<T> {
 /// # Fields
 /// - `data`: a fixed-size array of bytes.
 #[derive(Debug)]
-pub struct VirtMemory { data: *mut u8, size: usize }
+pub struct VirtMemory { data: RefCell<Box<[u8]>> }
 
 impl VirtMemory {
-    /// Create a new Memory instance with all bytes set to 0
+    /// Create a new Memory instance (size in bytes) with all bytes set to 0
     pub fn new(size: usize) -> Self {
-        let data = vec![0; size].into_boxed_slice();
-        let data = Box::into_raw(data) as *mut u8;
-        
-        Self::from_mem(data, size)
+        let ptr: Box<[u8]> = vec![0u8; size].into_boxed_slice();
+        Self { data: RefCell::new(ptr) }
     }
 
-    pub fn from_mem(mem: *mut u8, size: usize) -> Self {
-        Self { data: mem, size }
+    pub fn from_mem(mem: Box<[u8]>) -> Self {
+        Self { data: RefCell::new(mem) }
     }
 
     /// Get a reference to the data
     #[inline(always)]
-    pub fn get_data(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.data, self.size) }
-    }
-
-    /// Get a mutable reference to the data
-    #[inline(always)]
-    pub fn get_mut_data(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.data, self.size) }
+    pub fn get_data(&mut self) -> &mut [u8] {
+        self.data.get_mut()
     }
 }
 
@@ -133,7 +145,7 @@ impl VirtMemory {
 /// # Fields
 /// - `data`: a slice of bytes.
 /// - `ptr`: a Pointer to the start of the chunk.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct VirtMemoryChunk {
     data: *mut u8,
     lower_bound: usize,
@@ -185,7 +197,7 @@ impl VirtMemoryChunk {
     }
 
     // Read a byte from the memory chunk at the given address
-    /// may panic if the address is out of bounds
+    /// may panic b/c bounds checking is not done
     pub unsafe fn read_unchecked<T>(&self, address: usize) -> T {
         let address = address * std::mem::size_of::<T>();
         let data = self.data.add(address) as *const T;
@@ -193,13 +205,14 @@ impl VirtMemoryChunk {
     }
 
     /// Write a byte to the memory chunk at the given address
-    /// may panic if the address is out of bounds
+    /// may panic b/c bounds checking is not done
     pub unsafe fn write_unchecked<T>(&mut self, address: usize, value: T) {
         let address = address * std::mem::size_of::<T>();
         let data = self.data.add(
             address
         ) as *mut T;
-        data.write(value);
+        
+        *data = value;
     }
 
     /// Read a byte from the memory chunk at the given address
