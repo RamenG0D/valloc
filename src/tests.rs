@@ -170,7 +170,7 @@ fn realloc_test() {
     // our pointer is freed and reallocated here
     let mut ptr_b = realloc(&mut a, ptr_a, 30).unwrap();
     
-    println!("{:?}", a.chunks());
+    println!("Chunks AFTER: {:?}", a.chunks());
 
     // read value
     let v1 = *ptr_b;
@@ -185,63 +185,56 @@ fn realloc_test() {
     free(&mut a, &mut ptr_b).unwrap();
 }
 
-// #[test]
-// fn realloc_fail() {
-//     let mut a = Valloc::new(1024);
+#[test]
+fn realloc_fail() {
+    let mut a = Valloc::new(1024);
+    let ptr = a.alloc::<u8>(1).unwrap();
+    // this should fail to allocate space (not enough space)
+    let result = realloc(&mut a, ptr, 1000000);
+    if let Err(e) = result {
+        println!("{}", e);
+    } else {
+        eprintln!("Expected an allocation error!");
+        assert!(false);
+    }
+}
 
-//     let ptr = a.alloc::<u8>(1).unwrap();
+#[test]
+fn realloc_struct() {
+    #[derive(Debug)]
+    struct Test { a: u32, b: u32, z: u32 }
+    let mut a = Valloc::new(1024);
+    let mut ptr = a.alloc_type::<Test>(1).unwrap();
+    // write to the pointer
+    *ptr = Test { a: 10, b: 20, z: 30 };
+    println!("Size: {}", std::mem::size_of::<Test>());
+    let mut ptr = realloc(&mut a, ptr, 24).unwrap();
+    println!("{:?}", *ptr);
+    // read the value from the pointer
+    assert_eq!(ptr.a, 10);
+    assert_eq!(ptr.b, 20);
+    assert_eq!(ptr.z, 30);
+    free(&mut a, &mut ptr).unwrap();
+}
 
-//     // this should fail to allocate space (not enough space)
-//     let result = realloc(&mut a, ptr, 1000000);
-//     if let Err(e) = result {
-//         println!("{}", e);
-//     } else {
-//         eprintln!("Expected an allocation error!");
-//         assert!(false);
-//     }
-// }
+#[test]
+fn realloc_string() {
+    let mut a = Valloc::new(1024);
+    let mut iptr = a.alloc_type::<u8>(6).unwrap();
+    
+    let text = b"Hello".iter().map(|&x| x).collect::<Vec<u8>>();
+    let len = text.len();
+    
+    a.write_buffer(&mut iptr, text).unwrap();
+    
+    let mut ptr = realloc(&mut a, iptr, len-3).unwrap();
 
-// #[test]
-// fn realloc_struct() {
-//     #[derive(Debug)]
-//     struct Test { a: u32, b: u32, z: u32 }
+    let text = a.read_buffer(&ptr, len-3).unwrap();
+    let text = text.iter().map(|c| *c as char).collect::<String>();
+    let text = text.as_str();
+    println!("{text}");
 
-//     let mut a = Valloc::new(1024);
-//     let mut ptr = a.alloc_type::<Test>(1).unwrap();
+    assert_eq!(text, "He");
 
-//     // write to the pointer
-//     *ptr = Test { a: 10, b: 20, z: 30 };
-
-//     println!("Size: {}", std::mem::size_of::<Test>());
-
-//     let mut ptr = realloc(&mut a, ptr, 24).unwrap();
-
-//     println!("{:?}", *ptr);
-
-//     // read the value from the pointer
-//     assert_eq!(ptr.a, 10);
-//     assert_eq!(ptr.b, 20);
-//     assert_eq!(ptr.z, 30);
-
-//     free(&mut a, &mut ptr).unwrap();
-// }
-
-// #[test]
-// fn realloc_string() {
-//     let mut a = Valloc::new(1024);
-
-//     let mut iptr = a.alloc_type::<u8>(6).unwrap();
-
-//     let text = b"Hello".iter().map(|&x| x).collect::<Vec<u8>>();
-//     let len = text.len() - 1;
-
-//     a.write_buffer(&mut iptr, text).unwrap();
-
-//     let mut ptr = realloc(&mut a, iptr, len+5).unwrap();
-
-//     let text = a.read_buffer(&ptr, len).unwrap();
-//     let text = text.iter().map(|c| *c as char).collect::<Vec<char>>();
-//     text.iter().for_each(|t| print!("{t}")); println!();
-
-//     free(&mut a, &mut ptr).unwrap();
-// }
+    free(&mut a, &mut ptr).unwrap();
+}

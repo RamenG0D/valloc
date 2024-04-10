@@ -195,10 +195,10 @@ impl VirtMemoryChunk {
 
     // Read a byte from the memory chunk at the given address
     /// may panic b/c bounds checking is not done
-    pub unsafe fn read_unchecked<T: std::fmt::Debug>(&self, address: usize) -> T {
+    pub unsafe fn read_unchecked<T>(&self, address: usize) -> T {
         let address = address * std::mem::size_of::<T>();
         let data = self.data.add(address) as *const T;
-        dbg!(data.read());
+
         data.read()
     }
 

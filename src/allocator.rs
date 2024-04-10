@@ -1,21 +1,5 @@
 use crate::virtual_memory::{Pointer, VirtMemory, VirtMemoryChunk};
 
-struct BoxValue<T: ?Sized>(Box<T>);
-
-impl Into<Box<[u8]>> for BoxValue<[u8]> {
-    fn into(self) -> Box<[u8]> {
-        self.0
-    }
-}
-
-impl<T> TryFrom<&mut [T]> for BoxValue<[T]> {
-    type Error = String;
-    fn try_from(value: &mut [T]) -> Result<Self, Self::Error> {
-        let ptr = unsafe{ Box::from_raw(value) };
-        Ok(BoxValue(ptr))
-    }
-}
-
 /// The Valloc struct represents a Virtual Memory Allocator.
 /// It will be used to simulate the ability to allocate and deallocate memory.
 /// and is used on a simple stack or heap allocated array of bytes.
@@ -44,6 +28,18 @@ impl Valloc {
         }
     }
 
+    /// Create a new Kernel instance from existing memory.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `memory` - The existing memory to be used by the Kernel.
+    /// 
+    /// # Example
+    /// 
+    /// ```
+    /// let memory = vec![0u8; 1024].into_boxed_slice();
+    /// let kernel = Valloc::from_memory(memory);
+    /// ```
     pub fn from_memory<T>(memory: T) -> Self 
         where T: Into<Box<[u8]>>
     {
@@ -54,20 +50,33 @@ impl Valloc {
         }
     }
 
+    /// Get a reference to the virtual memory used by the Kernel.
     pub fn get_memory(&self) -> &VirtMemory {
         &self.memory
     }
 
+    /// Get a reference to the chunks vector.
     pub fn chunks(&self) -> &Vec<VirtMemoryChunk> {
         &self.chunks
     }
 
-    /// Allocates a new MemoryChunk instance, checking if there is enough CONTIGUOUS space in the memory to allocate the chunk.
-    /// If there is enough space, it will create a new MemoryChunk instance and add it to the chunks vector.
-    /// Returns a Pointer to the start of the chunk if successful, otherwise returns an error message.
+    /// Allocate a new MemoryChunk instance.
+    /// 
+    /// This method checks if there is enough contiguous space in the memory to allocate the chunk.
+    /// If there is enough space, it creates a new MemoryChunk instance and adds it to the chunks vector.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `size` - The size of the chunk to be allocated, in bytes.
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(Pointer<T>)` - A pointer to the start of the allocated chunk if successful.
+    /// * `Err(String)` - An error message if allocation fails.
     /// 
     /// # Note
-    /// THIS ALLOCATES IN BYTES!
+    /// 
+    /// This method allocates in bytes.
     pub fn alloc<T>(&mut self, size: usize) -> Result<Pointer<T>, String> {
         let size = match size {
             0 => return Err("Cannot allocate 0 bytes".to_string()),
@@ -106,46 +115,97 @@ impl Valloc {
         Err(format!("Failed to allocate memory for size => {size}"))
     }
 
+    /// Allocate a new MemoryChunk instance with a specific type.
+    /// 
+    /// This method automatically converts the allocation size from n bytes to n * sizeof(Type) bytes.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `size` - The size of the chunk to be allocated, in number of elements of type T.
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(Pointer<T>)` - A pointer to the start of the allocated chunk if successful.
+    /// * `Err(String)` - An error message if allocation fails.
     pub fn alloc_type<T>(&mut self, size: usize) -> Result<Pointer<T>, String> {
-        // this is to automatically convert the alloc size from
-        // n bytes
-        // to
-        // n * sizeof(Type) bytes
         self.alloc(size * std::mem::size_of::<T>())
     }
 
+    /// Reallocate a MemoryChunk instance.
+    /// 
+    /// This method reallocates the memory for a given pointer to a new size.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ptr` - The pointer to the memory chunk to be reallocated.
+    /// * `new_size` - The new size of the memory chunk, in bytes.
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(Pointer<T>)` - A pointer to the reallocated memory chunk if successful.
+    /// * `Err(String)` - An error message if reallocation fails.
     pub fn realloc<T>(&mut self, ptr: Pointer<T>, new_size: usize) -> Result<Pointer<T>, String> 
         where T: std::fmt::Debug
     {
         realloc(self, ptr, new_size)
     }
 
-    /// Generally attempts to deallocate a MemoryChunk instance by removing it from the chunks vector.
-    /// BUT this method aims to behave like the free() function in C, so it will NOT accept a Pointer to the chunk to be deallocated
-    /// if it doesn't point to the first element of the chunk. (only works if the pointer is the same as what was returned by alloc())
-    /// It also wont zero out the memory, so the data will still be there, but the chunk will be removed from the chunks vector.
+    /// Deallocate a MemoryChunk instance.
+    /// 
+    /// This method removes a MemoryChunk instance from the chunks vector.
+    /// It behaves like the free() function in C and only accepts a pointer to the first element of the chunk.
+    /// The memory is not zeroed out, so the data will still be there, but the chunk will be removed from the chunks vector.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ptr` - A mutable reference to the pointer to the memory chunk to be deallocated.
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(())` - If deallocation is successful.
+    /// * `Err(String)` - An error message if deallocation fails.
     pub fn free<T>(&mut self, ptr: &mut Pointer<T>) -> Result<(), String> {
         free(self, ptr)
     }
 
-    /// Takes a given Pointer and attempts to find the corresponding MemoryChunk which contains the address (within its range [upper..lower])
-    pub fn read<T>(&self, ptr: &Pointer<T>) -> Result<T, String> 
-        where T: std::fmt::Debug
-    {
+    /// Read a value from memory.
+    /// 
+    /// This method takes a pointer and attempts to find the corresponding MemoryChunk which contains the address.
+    /// It then reads the value from the address if found.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ptr` - A reference to the pointer to the memory location to be read.
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(T)` - The value read from memory if successful.
+    /// * `Err(String)` - An error message if reading fails.
+    pub fn read<T>(&self, ptr: &Pointer<T>) -> Result<T, String> {
         let addr = ptr.index()?;
         if let Some(chunk) = self.chunks.iter().find(move |chunk| {
             addr <= chunk.upper_bound() && addr >= chunk.lower_bound()
         }) {
-            println!("YEP, we expect to be here => {addr}");
             return Ok(unsafe{chunk.read_unchecked(addr)});
         } else {
-            println!("THE FUCK! HOW CAN YOU DO BOTH! => addr: {addr}");
             Err(format!("Invalid read at address => {}", addr))
         }
     }
 
-    /// Takes a given Pointer and attempts to find the corresponding MemoryChunk which contains the address (within its range [upper..lower])
-    /// and writes the value to the address if found
+    /// Write a value to memory.
+    /// 
+    /// This method takes a pointer and attempts to find the corresponding MemoryChunk which contains the address.
+    /// It then writes the value to the address if found.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ptr` - A reference to the pointer to the memory location to be written.
+    /// * `value` - The value to be written to memory.
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(())` - If writing is successful.
+    /// * `Err(String)` - An error message if writing fails.
     pub fn write<T>(&mut self, ptr: &Pointer<T>, value: T) -> Result<(), String> {
         let addr = ptr.index()?;
         if let Some(chunk) = self.chunks.iter_mut().find(|chunk| {
@@ -156,9 +216,19 @@ impl Valloc {
         Err(format!("Invalid write at address => {addr}"))
     }
 
-    /// QOL function to write a buffer into mem
-    /// of course this is checked for bounds
-    /// but may be unsafe still
+    /// Write a buffer to memory.
+    /// 
+    /// This method writes a buffer of values to memory starting from the given pointer.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ptr` - A reference to the pointer to the memory location to start writing the buffer.
+    /// * `buffer` - The buffer of values to be written to memory.
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(())` - If writing is successful.
+    /// * `Err(String)` - An error message if writing fails.
     pub fn write_buffer<T>(&mut self, ptr: &Pointer<T>, buffer: Vec<T>) -> Result<(), String> {
         let mut i = 0;
         for val in buffer {
@@ -169,12 +239,20 @@ impl Valloc {
         Ok(())
     }
 
-    /// QOL function to read a buffer from mem
-    /// of course this is checked for bounds
-    /// but may be unsafe still
-    pub fn read_buffer<T>(&self, ptr: &Pointer<T>, size: usize) -> Result<Vec<T>, String> 
-        where T: std::fmt::Debug
-    {
+    /// Read a buffer from memory.
+    /// 
+    /// This method reads a buffer of values from memory starting from the given pointer.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ptr` - A reference to the pointer to the memory location to start reading the buffer.
+    /// * `size` - The size of the buffer, in number of elements of type T.
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(Vec<T>)` - The buffer of values read from memory if successful.
+    /// * `Err(String)` - An error message if reading fails.
+    pub fn read_buffer<T>(&self, ptr: &Pointer<T>, size: usize) -> Result<Vec<T>, String> {
         let mut buffer = Vec::new();
         for i in 0..size {
             buffer.push(
@@ -193,22 +271,22 @@ pub fn free<T>(vallocator: &mut Valloc, ptr: &mut Pointer<T>) -> Result<(), Stri
 
     if vallocator.chunks.iter().find(|chunk| {
         addr <= chunk.upper_bound() && addr >= chunk.lower_bound()
-    }).is_none() {
+    }).is_some() {
+        // we need to properly compare the real address (internal array pointer)
+        let ptr = ptr.address().unwrap().as_ptr() as usize;
+        // find the chunk that contains the pointer
+        vallocator.chunks.retain(|chunk| {
+            let chunk_ptr = chunk.data() as usize;
+            chunk_ptr != ptr
+        });
+    } else {
         return Err(format!("Failed to free memory at address => {addr}"));
     }
-
-    // find the chunk that contains the pointer
-    vallocator.chunks.retain(|chunk| {
-        !(addr <= chunk.upper_bound()) && 
-        !(addr >= chunk.lower_bound())
-    });
 
     Ok(())
 }
 
-pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) -> Result<Pointer<T>, String> 
-    where T: std::fmt::Debug
-{
+pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) -> Result<Pointer<T>, String> {
     // check if the new size is 0
     if nsize == 0 { return Err("Cannot reallocate 0 bytes".to_string()); }
     // if the size is greater than the current amount of memory left
@@ -217,7 +295,6 @@ pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) ->
     }
     // if new size is the same as the current size
     if nsize == ptr.address().unwrap().len() {
-        println!("Returned same ptr");
         return Ok(ptr);
     }
 
@@ -278,11 +355,7 @@ pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) ->
         
         // allocate a spcae the size of our current chunk size + the new chunk size
         let mut new_ptr: Pointer<T> = vallocator.alloc(nsize)?;
-        
-        dbg!(chunk_size); dbg!(nsize);
-        println!("Ptr {{ address: {:?}, index: {}, len {} }}", ptr.address().unwrap().as_ptr(), ptr.index().unwrap(), ptr.address().unwrap().len());
-        println!("New Ptr {{ address: {:?}, index: {}, len: {} }}", new_ptr.address().unwrap().as_ptr(), new_ptr.index().unwrap(), new_ptr.address().unwrap().len());
-        
+
         // read the data from the old ptr (store it to put it in the new ptr)
         let data = vallocator.read_buffer(&ptr, chunk_size)?;
 
