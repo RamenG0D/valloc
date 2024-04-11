@@ -33,7 +33,7 @@ fn alloc_string() {
     text.iter().for_each(|t| print!("{t}")); println!();
 
     // test if reading from a pointer that is out of bounds will return an error
-    let result = a.read(&ptr.add(10));
+    let result = a.read(&(ptr + 10usize));
     if let Err(e) = result {
         println!("error that we expected: {}", e);
     } else {
@@ -169,14 +169,10 @@ fn realloc_test() {
 
     // our pointer is freed and reallocated here
     let mut ptr_b = realloc(&mut a, ptr_a, 30).unwrap();
-    
-    println!("Chunks AFTER: {:?}", a.chunks());
 
-    // read value
+    // read value (both deref method & allocator.read() method)
     let v1 = *ptr_b;
-    print!("v1: {v1}, ");
     let v2 = a.read(&ptr_b).unwrap();
-    println!("v2: {v2}");
 
     // read the value from the pointer
     assert_eq!(v1, 10);
@@ -201,7 +197,7 @@ fn realloc_fail() {
 
 #[test]
 fn realloc_struct() {
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Copy)]
     struct Test { a: u32, b: u32, z: u32 }
     let mut a = Valloc::new(1024);
     let mut ptr = a.alloc_type::<Test>(1).unwrap();

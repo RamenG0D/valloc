@@ -37,6 +37,7 @@ impl Valloc {
     /// # Example
     /// 
     /// ```
+    /// use valloc::allocator::Valloc;
     /// let memory = vec![0u8; 1024].into_boxed_slice();
     /// let kernel = Valloc::from_memory(memory);
     /// ```
@@ -117,7 +118,7 @@ impl Valloc {
 
     /// Allocate a new MemoryChunk instance with a specific type.
     /// 
-    /// This method automatically converts the allocation size from n bytes to n * sizeof(Type) bytes.
+    /// This method automatically converts the allocation size from `n bytes` to `n * sizeof(Type)` bytes.
     /// 
     /// # Arguments
     /// 
@@ -145,7 +146,7 @@ impl Valloc {
     /// * `Ok(Pointer<T>)` - A pointer to the reallocated memory chunk if successful.
     /// * `Err(String)` - An error message if reallocation fails.
     pub fn realloc<T>(&mut self, ptr: Pointer<T>, new_size: usize) -> Result<Pointer<T>, String> 
-        where T: std::fmt::Debug
+        where T: std::fmt::Debug + Copy
     {
         realloc(self, ptr, new_size)
     }
@@ -182,7 +183,7 @@ impl Valloc {
     /// * `Ok(T)` - The value read from memory if successful.
     /// * `Err(String)` - An error message if reading fails.
     pub fn read<T>(&self, ptr: &Pointer<T>) -> Result<T, String> {
-        let addr = ptr.index()?;
+        let addr = ptr.get_index()?;
         if let Some(chunk) = self.chunks.iter().find(move |chunk| {
             addr <= chunk.upper_bound() && addr >= chunk.lower_bound()
         }) {
@@ -207,7 +208,7 @@ impl Valloc {
     /// * `Ok(())` - If writing is successful.
     /// * `Err(String)` - An error message if writing fails.
     pub fn write<T>(&mut self, ptr: &Pointer<T>, value: T) -> Result<(), String> {
-        let addr = ptr.index()?;
+        let addr = ptr.get_index()?;
         if let Some(chunk) = self.chunks.iter_mut().find(|chunk| {
             addr <= chunk.upper_bound() && addr >= chunk.lower_bound()
         }) {
@@ -229,10 +230,10 @@ impl Valloc {
     /// 
     /// * `Ok(())` - If writing is successful.
     /// * `Err(String)` - An error message if writing fails.
-    pub fn write_buffer<T>(&mut self, ptr: &Pointer<T>, buffer: Vec<T>) -> Result<(), String> {
-        let mut i = 0;
+    pub fn write_buffer<T: Copy>(&mut self, ptr: &Pointer<T>, buffer: Vec<T>) -> Result<(), String> {
+        let mut i = 0usize;
         for val in buffer {
-            let ptr = ptr.add(i);
+            let ptr = *ptr + i;
             self.write(&ptr, val)?;
             i += 1;
         }
@@ -252,11 +253,12 @@ impl Valloc {
     /// 
     /// * `Ok(Vec<T>)` - The buffer of values read from memory if successful.
     /// * `Err(String)` - An error message if reading fails.
-    pub fn read_buffer<T>(&self, ptr: &Pointer<T>, size: usize) -> Result<Vec<T>, String> {
+    pub fn read_buffer<T: Copy>(&self, ptr: &Pointer<T>, size: usize) -> Result<Vec<T>, String> {
         let mut buffer = Vec::new();
+        let ptr = *ptr;
         for i in 0..size {
             buffer.push(
-                self.read(&ptr.add(i))?
+                self.read(&(ptr + i))?
             );
         }
         Ok(buffer)
@@ -264,7 +266,7 @@ impl Valloc {
 }
 
 pub fn free<T>(vallocator: &mut Valloc, ptr: &mut Pointer<T>) -> Result<(), String> {
-    let addr = match ptr.index() {
+    let addr = match ptr.get_index() {
         Ok(addr) => addr,
         Err(e) => return Err(format!("Invalid Ptr Free: {e}"))
     };
@@ -286,7 +288,7 @@ pub fn free<T>(vallocator: &mut Valloc, ptr: &mut Pointer<T>) -> Result<(), Stri
     Ok(())
 }
 
-pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) -> Result<Pointer<T>, String> {
+pub fn realloc<T: Copy>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) -> Result<Pointer<T>, String> {
     // check if the new size is 0
     if nsize == 0 { return Err("Cannot reallocate 0 bytes".to_string()); }
     // if the size is greater than the current amount of memory left
@@ -299,7 +301,7 @@ pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) ->
     }
 
     // get the address (index in valloc memory) of the pointer
-    let addr = ptr.index()?;
+    let addr = ptr.get_index()?;
     // find the chunk that contains the pointer
     if let Some(chunk) = vallocator.chunks.iter_mut().find(move |chunk| {
         addr <= chunk.upper_bound() && addr >= chunk.lower_bound()

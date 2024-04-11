@@ -1,4 +1,4 @@
-use std::{cell::RefCell, ops::{Deref, DerefMut}, usize};
+use std::{cell::RefCell, ops::{Deref, DerefMut, Index}, usize};
 
 /// The Pointer type represents a pointer to a memory address
 /// It also contricts the type of the data that is being pointed to to its Generic allowing for type safety.
@@ -7,13 +7,67 @@ use std::{cell::RefCell, ops::{Deref, DerefMut}, usize};
 /// But it does NOT store the actual value of the data, it just tells the Pointer what the data is and its also used
 /// elsewhere to ensure that the data being read/written correctly and the methods wont except invalid combonations pointers
 /// and data types into methods that could cause undefined behavior.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Pointer<T> {
     Pointer {
         address: *mut [T],
         index: usize
     },
     NULL
+}
+
+use std::ops::{Add, Sub};
+
+impl<T> Index<usize> for Pointer<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &T {
+        match self {
+            Pointer::Pointer { address, .. } => {
+                let ptr = unsafe{(*address).as_ref()}.unwrap();
+                ptr.get(index).expect("Failed to get the value of the pointer!")
+            },
+            Pointer::NULL => panic!("Attempted to dereference a NULL pointer")
+        }
+    }
+}
+
+impl<T, U> Add<U> for Pointer<T> 
+    where U: Into<usize>
+{
+    type Output = Pointer<T>;
+
+    fn add(self, rhs: U) -> Self::Output {
+        let index = match self {
+            Pointer::Pointer { index, .. } => index + rhs.into(),
+            Pointer::NULL => 0
+        };
+        
+        let address = self.address().unwrap();
+        let address = address as *const [T];
+        let address = address.cast_mut();
+
+        Pointer::Pointer { address, index }
+    }
+}
+
+impl<T, U> Sub<U> for Pointer<T> 
+    where U: Into<usize>
+{
+    type Output = Pointer<T>;
+
+    fn sub(self, rhs: U) -> Self::Output {
+        let index = match self {
+            Pointer::Pointer { index, .. } => index - rhs.into(),
+            Pointer::NULL => 0
+        };
+        
+        let address = self.address().unwrap();
+        let address = address as *const [T];
+        let address = address.cast_mut();
+
+        Pointer::Pointer { address, index }
+    }
 }
 
 impl<T> Deref for Pointer<T> {
@@ -60,7 +114,7 @@ impl<T> Pointer<T> {
         }
     }
     
-    pub fn index(&self) -> Result<usize, String> {
+    pub fn get_index(&self) -> Result<usize, String> {
         match self {
             Pointer::Pointer { index, .. } => Ok(*index),
             Pointer::NULL => Err("Attempted to get the index of a NULL pointer".to_string())
@@ -77,34 +131,6 @@ impl<T> Pointer<T> {
             },
             Pointer::NULL => Err("Attempted to cast a NULL pointer".to_string())
         }
-    }
-
-    #[inline]
-    pub fn add(&self, offset: usize) -> Pointer<T> {
-        let index = match self {
-            Pointer::Pointer { index, .. } => index + offset,
-            Pointer::NULL => 0
-        };
-        
-        let address = self.address().unwrap();
-        let address = address as *const [T];
-        let address = address.cast_mut();
-
-        Pointer::Pointer { address, index }
-    }
-
-    #[inline]
-    pub fn sub(&self, offset: usize) -> Pointer<T> {
-        let index = match self {
-            Pointer::Pointer { index, .. } => index - offset,
-            Pointer::NULL => 0
-        };
-        
-        let address = self.address().unwrap();
-        let address = address as *const [T];
-        let address = address.cast_mut();
-
-        Pointer::Pointer { address, index }
     }
 }
 
