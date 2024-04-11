@@ -81,7 +81,7 @@ impl Valloc {
     pub fn alloc<T>(&mut self, size: usize) -> Result<Pointer<T>, String> {
         let size = match size {
             0 => return Err("Cannot allocate 0 bytes".to_string()),
-            1 => size,
+            // 1 => size,
             _ => size - 1
         };
 
@@ -100,17 +100,28 @@ impl Valloc {
             }
 
             let m = self.memory.get_data().as_mut();
+            let mptr = 
+            if start == end {
+                unsafe{m.as_mut_ptr().add(start)}
+            } else {
+                (&mut m[start..end]).as_mut_ptr()
+            };
 
             // create a new chunk
-            let chunk = VirtMemoryChunk::new(
-                &mut m[start..end], 
+            let chunk = VirtMemoryChunk::from_data(
+                mptr, 
                 start, 
                 end
             );
+            println!("{:?}", chunk);
             self.chunks.push(chunk);
 
-            let ptr = unsafe{ std::mem::transmute::<&mut [u8], &mut [T]>(&mut m[start..end]) };
-            return Ok(Pointer::new(ptr, start));
+            let ptr = unsafe{ std::mem::transmute::<*mut u8, *mut T>(mptr) };
+            let ptr = std::ptr::slice_from_raw_parts_mut(ptr, size+1);
+
+            let ptr = Pointer::new(unsafe{ptr.as_mut()}.expect("Failed to construct Pointer"), start);
+
+            return Ok(ptr);
         }
         
         Err(format!("Failed to allocate memory for size => {size}"))
@@ -288,7 +299,9 @@ pub fn free<T>(vallocator: &mut Valloc, ptr: &mut Pointer<T>) -> Result<(), Stri
     Ok(())
 }
 
-pub fn realloc<T: Copy>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) -> Result<Pointer<T>, String> {
+pub fn realloc<T: Copy>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usize) -> Result<Pointer<T>, String> 
+    where T: std::fmt::Debug
+{
     // check if the new size is 0
     if nsize == 0 { return Err("Cannot reallocate 0 bytes".to_string()); }
     // if the size is greater than the current amount of memory left
@@ -308,11 +321,7 @@ pub fn realloc<T: Copy>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usi
     }).copied() {
         let chunk_size = chunk.upper_bound() - chunk.lower_bound();
         
-        // check if our current chunk size is 0
-        if chunk_size == 0 {
-            // return an error message, since we can't reallocate memory that doesn't exist
-            return Err(format!("Failed to reallocate memory for size => {nsize}: Current size is 0 (or somehow broke the size of the mem_chunk)"));
-        } else if nsize < chunk_size {
+        if nsize < chunk_size {
             // Okay...
             // we just deallocate the difference in sizes
             // and return the same pointer
@@ -359,13 +368,14 @@ pub fn realloc<T: Copy>(vallocator: &mut Valloc, mut ptr: Pointer<T>, nsize: usi
         let mut new_ptr: Pointer<T> = vallocator.alloc(nsize)?;
 
         // read the data from the old ptr (store it to put it in the new ptr)
-        let data = vallocator.read_buffer(&ptr, chunk_size)?;
+        let data = vallocator.read_buffer(&ptr, chunk_size + 1)?;
+        println!("{:?}", data);
+        
+        // free the old ptr (Note: this does NOT zero out the memory, it just removes the chunk from the chunks vector, see free() for more on this)
+        vallocator.free(&mut ptr)?;
 
         // write the data to the new ptr
         vallocator.write_buffer(&mut new_ptr, data)?;
-
-        // free the old ptr (Note: this does NOT zero out the memory, it just removes the chunk from the chunks vector, see free() for more on this)
-        vallocator.free(&mut ptr)?;
         
         // were done return the new ptr
         return Ok(new_ptr);

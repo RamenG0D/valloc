@@ -1,4 +1,4 @@
-use std::{cell::RefCell, ops::{Deref, DerefMut, Index}, usize};
+use std::{cell::RefCell, fmt::Write, ops::{Deref, DerefMut, Index, IndexMut}, usize};
 
 /// The Pointer type represents a pointer to a memory address
 /// It also contricts the type of the data that is being pointed to to its Generic allowing for type safety.
@@ -7,7 +7,7 @@ use std::{cell::RefCell, ops::{Deref, DerefMut, Index}, usize};
 /// But it does NOT store the actual value of the data, it just tells the Pointer what the data is and its also used
 /// elsewhere to ensure that the data being read/written correctly and the methods wont except invalid combonations pointers
 /// and data types into methods that could cause undefined behavior.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub enum Pointer<T> {
     Pointer {
         address: *mut [T],
@@ -18,17 +18,44 @@ pub enum Pointer<T> {
 
 use std::ops::{Add, Sub};
 
+impl<T> std::fmt::Debug for Pointer<T> 
+    where T: std::fmt::Debug
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Pointer::Pointer {
+                address,
+                index
+            } => {
+                f.debug_struct("Pointer")
+                    .field("address", address)
+                    .field("index", index)
+                    .field("Address_Range", &{
+                        let len = unsafe{(**address).len()};
+                        let index = *index;
+                        index..(index + len)
+                    })
+                    .finish()
+            },
+            _ => {
+                f.write_str("Pointer { NULL }")
+            }
+        }
+    }
+}
+
 impl<T> Index<usize> for Pointer<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &T {
-        match self {
-            Pointer::Pointer { address, .. } => {
-                let ptr = unsafe{(*address).as_ref()}.unwrap();
-                ptr.get(index).expect("Failed to get the value of the pointer!")
-            },
-            Pointer::NULL => panic!("Attempted to dereference a NULL pointer")
-        }
+        self.address().unwrap().get(index).expect("Failed to get the value of the pointer!")
+    }
+}
+
+impl<T> IndexMut<usize> for Pointer<T> {
+
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        self.address_mut().unwrap().get_mut(index).expect("Failed to get the value of the pointer!")
     }
 }
 
@@ -70,14 +97,89 @@ impl<T, U> Sub<U> for Pointer<T>
     }
 }
 
+impl<T, U> Add<U> for &Pointer<T> 
+    where U: Into<usize>
+{
+    type Output = Pointer<T>;
+
+    fn add(self, rhs: U) -> Self::Output {
+        let index = match self {
+            Pointer::Pointer { index, .. } => (*index) + rhs.into(),
+            Pointer::NULL => 0
+        };
+        
+        let address = self.address().unwrap();
+        let address = address as *const [T];
+        let address = address.cast_mut();
+
+        Pointer::Pointer { address, index }
+    }
+}
+
+impl<T, U> Sub<U> for &Pointer<T> 
+    where U: Into<usize>
+{
+    type Output = Pointer<T>;
+
+    fn sub(self, rhs: U) -> Self::Output {
+        let index = match self {
+            Pointer::Pointer { index, .. } => (*index) - rhs.into(),
+            Pointer::NULL => 0
+        };
+        
+        let address = self.address().unwrap();
+        let address = address as *const [T];
+        let address = address.cast_mut();
+
+        Pointer::Pointer { address, index }
+    }
+}
+
+/*impl<T, U> Add<U> for &mut Pointer<T> 
+    where U: Into<usize>
+{
+    type Output = Pointer<T>;
+
+    fn add(self, rhs: U) -> Self::Output {
+        let index = match self {
+            Pointer::Pointer { index, .. } => (*index) + rhs.into(),
+            Pointer::NULL => 0
+        };
+        
+        let address = self.address().unwrap();
+        let address = address as *const [T];
+        let address = address.cast_mut();
+
+        Pointer::Pointer { address, index }
+    }
+}
+
+impl<T, U> Sub<U> for &mut Pointer<T> 
+    where U: Into<usize>
+{
+    type Output = Pointer<T>;
+
+    fn sub(self, rhs: U) -> Self::Output {
+        let index = match self {
+            Pointer::Pointer { index, .. } => (*index) - rhs.into(),
+            Pointer::NULL => 0
+        };
+        
+        let address = self.address().unwrap();
+        let address = address as *const [T];
+        let address = address.cast_mut();
+
+        Pointer::Pointer { address, index }
+    }
+}*/
+
 impl<T> Deref for Pointer<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        match self {
+        match *self {
             Pointer::Pointer { address, index } => {
-                let address = address.to_owned();
-                unsafe{(*address).as_ref()}.get(*index).expect("Failed to get the value of the pointer!")
+                unsafe{(*address).as_ref()}.get(index).expect("Failed to get the value of the pointer!")
             },
             Pointer::NULL => panic!("Attempted to dereference a NULL pointer")
         }
@@ -86,9 +188,10 @@ impl<T> Deref for Pointer<T> {
 
 impl<T> DerefMut for Pointer<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
+        match *self {
             Pointer::Pointer { address, index } => {
-                unsafe{(**address).as_mut()}.get_mut(*index).expect("Failed to get the value of the pointer!")
+                let ptr = unsafe{(*address).as_mut()};
+                &mut ptr[index]
             },
             Pointer::NULL => panic!("Attempted to dereference a NULL pointer")
         }
@@ -177,8 +280,12 @@ pub struct VirtMemoryChunk {
 
 impl VirtMemoryChunk {
     pub fn new(data: &mut [u8], start: usize, end: usize) -> Self {
+        Self::from_data(data.as_mut_ptr(), start, end)
+    }
+
+    pub fn from_data(data: *mut u8, start: usize, end: usize) -> Self {
         Self {
-            data: data.as_mut_ptr() as *mut u8,
+            data,
             lower_bound: start,
             upper_bound:   end,
         }

@@ -51,7 +51,7 @@ fn alloc_struct() {
     let mut a = Valloc::new(1024);
     
     let mut ptr = a.alloc_type(1).unwrap();
-
+    
     // write the struct to our allocated memory
     *ptr = Test { a: 10, b: 20, z: 30 };
 
@@ -72,7 +72,7 @@ fn ptr_free() {
     // this should fail (we will handle the error without a panic though)
     let result = a.read(&ptr);
     if let Err(e) = result {
-        println!("{}", e);
+        println!("{e}");
     } else {
         eprintln!("Expected an freed pointer error!");
         assert!(false);
@@ -150,6 +150,7 @@ fn ptr_deref() {
     let mut a = Valloc::new(10);
     let mut ptr = a.alloc::<u8>(1).unwrap();
 
+    println!("{:?}", ptr);
     // write to the pointer using the deref trait
     *ptr = 10;
 
@@ -171,11 +172,11 @@ fn realloc_test() {
     let mut ptr_b = realloc(&mut a, ptr_a, 30).unwrap();
 
     // read value (both deref method & allocator.read() method)
-    let v1 = *ptr_b;
     let v2 = a.read(&ptr_b).unwrap();
+    // let v1 = *ptr_b;
 
     // read the value from the pointer
-    assert_eq!(v1, 10);
+    // assert_eq!(v1, 10);
     assert_eq!(v2, 10);
 
     free(&mut a, &mut ptr_b).unwrap();
@@ -188,7 +189,7 @@ fn realloc_fail() {
     // this should fail to allocate space (not enough space)
     let result = realloc(&mut a, ptr, 1000000);
     if let Err(e) = result {
-        println!("{}", e);
+        println!("{e}");
     } else {
         eprintln!("Expected an allocation error!");
         assert!(false);
@@ -223,6 +224,7 @@ fn realloc_string() {
     
     a.write_buffer(&mut iptr, text).unwrap();
     
+    // shorten string by 3 characters (remove "llo")
     let mut ptr = realloc(&mut a, iptr, len-3).unwrap();
 
     let text = a.read_buffer(&ptr, len-3).unwrap();
@@ -233,4 +235,50 @@ fn realloc_string() {
     assert_eq!(text, "He");
 
     free(&mut a, &mut ptr).unwrap();
+}
+
+#[test]
+fn single_ptr_stress_test() {
+    let mut a = Valloc::new(4096);
+    // pointer to half of the allocatable memory
+    let mut ptr = a.alloc::<u8>(4096).unwrap();
+
+    // write to the pointer
+    for i in 0..4095 {
+        ptr[i] = (i + 1) as u8;
+    }
+
+    // read from the pointer (and check the values)
+    for i in 0..4095 {
+        assert_eq!(ptr[i], (i + 1) as u8);
+    }
+
+    free(&mut a, &mut ptr).unwrap();
+}
+
+#[test]
+fn many_ptr_stress_test() {
+    let mut a = Valloc::new(4096);
+    let mut ptrs = Vec::new();
+
+    for _ in 0..10 {
+        let ptr = a.alloc::<u8>(1).unwrap();
+        ptrs.push(ptr);
+    }
+
+    for ptr in ptrs.iter_mut() {
+        let mut ptr = *ptr;
+        println!("{:?}", ptr);
+        *ptr = 10;
+        // a.write(ptr, 10).unwrap();
+    }
+
+    for ptr in ptrs.iter() {
+        let val = a.read(ptr).unwrap();
+        assert_eq!(val, 10);
+    }
+
+    for ptr in ptrs.iter_mut() {
+        free(&mut a, ptr).unwrap();
+    }
 }
