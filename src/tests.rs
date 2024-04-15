@@ -1,4 +1,4 @@
-use crate::{allocator::{free, realloc, Valloc}, virtual_memory::Pointer};
+use crate::{allocator::{free, realloc, Valloc}, pointer::Pointer};
 
 #[test]
 fn alloc_u8() {
@@ -23,10 +23,10 @@ fn alloc_string() {
     // allocate space (in bytes) for a character
     let mut ptr = a.alloc_type::<u8>(6).unwrap();
     
-    let text = b"Hello".iter().map(|&x| x).collect::<Vec<u8>>();
+    let text = b"Hello";
     let len = text.len();
 
-    a.write_buffer(&mut ptr, text).unwrap();
+    a.write_buffer(&mut ptr, text.as_ptr(), len).unwrap();
 
     let text = a.read_buffer(&ptr, len).unwrap();
     let text = text.iter().map(|c| *c as char).collect::<Vec<char>>();
@@ -47,6 +47,7 @@ fn alloc_string() {
 #[test]
 fn alloc_struct() {
     // custom struct to test with
+    #[derive(Debug)]
     struct Test { a: u32, b: u32, z: u32 }
     let mut a = Valloc::new(1024);
     
@@ -166,6 +167,7 @@ fn realloc_test() {
     let mut ptr_a = a.alloc::<u8>(1).unwrap();
 
     // write to the pointer
+    // a.write(&ptr_a, 10).unwrap();
     *ptr_a = 10;
 
     // our pointer is freed and reallocated here
@@ -173,10 +175,10 @@ fn realloc_test() {
 
     // read value (both deref method & allocator.read() method)
     let v2 = a.read(&ptr_b).unwrap();
-    // let v1 = *ptr_b;
+    let v1 = *ptr_b;
 
     // read the value from the pointer
-    // assert_eq!(v1, 10);
+    assert_eq!(v1, 10);
     assert_eq!(v2, 10);
 
     free(&mut a, &mut ptr_b).unwrap();
@@ -202,15 +204,20 @@ fn realloc_struct() {
     struct Test { a: u32, b: u32, z: u32 }
     let mut a = Valloc::new(1024);
     let mut ptr = a.alloc_type::<Test>(1).unwrap();
+    
     // write to the pointer
     *ptr = Test { a: 10, b: 20, z: 30 };
-    println!("Size: {}", std::mem::size_of::<Test>());
-    let mut ptr = realloc(&mut a, ptr, 24).unwrap();
-    println!("{:?}", *ptr);
+
+    let mut ptr = realloc(&mut a, ptr, std::mem::size_of::<Test>()*2).unwrap();
+    
+    dbg!(*ptr);
+    dbg!(a.read(&ptr).unwrap());
+    
     // read the value from the pointer
     assert_eq!(ptr.a, 10);
     assert_eq!(ptr.b, 20);
     assert_eq!(ptr.z, 30);
+
     free(&mut a, &mut ptr).unwrap();
 }
 
@@ -219,10 +226,10 @@ fn realloc_string() {
     let mut a = Valloc::new(1024);
     let mut iptr = a.alloc_type::<u8>(6).unwrap();
     
-    let text = b"Hello".iter().map(|&x| x).collect::<Vec<u8>>();
+    let text = b"Hello";
     let len = text.len();
-    
-    a.write_buffer(&mut iptr, text).unwrap();
+
+    a.write_buffer(&mut iptr, text.as_ptr(), len).unwrap();
     
     // shorten string by 3 characters (remove "llo")
     let mut ptr = realloc(&mut a, iptr, len-3).unwrap();
@@ -261,21 +268,20 @@ fn many_ptr_stress_test() {
     let mut a = Valloc::new(4096);
     let mut ptrs = Vec::new();
 
-    for _ in 0..10 {
-        let ptr = a.alloc::<u8>(1).unwrap();
+    // allocate 4096 pointers
+    for i in 0..2 {
+        let mut ptr = a.alloc::<u8>(1).unwrap();
+        *ptr = i;
+        println!("V1: {}", *ptr);
         ptrs.push(ptr);
     }
-
-    for ptr in ptrs.iter_mut() {
-        let mut ptr = *ptr;
-        println!("{:?}", ptr);
-        *ptr = 10;
-        // a.write(ptr, 10).unwrap();
+    
+    // read from the pointers (and check the values)
+    for i in 0..ptrs.len() {
+        println!("{}", *(ptrs[i]));
     }
-
-    for ptr in ptrs.iter() {
-        let val = a.read(ptr).unwrap();
-        assert_eq!(val, 10);
+    for i in 0..ptrs.len() {
+        assert_eq!(*(ptrs[i]), i as u8);
     }
 
     for ptr in ptrs.iter_mut() {

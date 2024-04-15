@@ -1,12 +1,18 @@
-workspace = { members = ["valloc_test"] }
-
 [package]
 name = "valloc"
-version = "0.1.0"
+version = "0.0.2"
 edition = "2021"
 
 [lib]
 name = "valloc"
-crate-type = ["rlib"]
+crate-type = ["staticlib"]
 
-[dependencies]
+[[example]]
+crate-type = ["bin"]
+name = "c_test"
+
+[[example]]
+name  = "valloc_shell"
+path  = "examples/valloc_shell.rs"
+test  = false
+bench = false
