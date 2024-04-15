@@ -7,12 +7,18 @@ edition = "2021"
 name = "valloc"
 crate-type = ["staticlib"]
 
+[features]
+cbindings = ["dep:cbindgen"]
+
+[dependencies]
+# not needed for the library, IF you don't need to generate the "C"/"CXX" bindings
+cbindgen = { version = "0.26.0", optional = true }
+
 [[example]]
 crate-type = ["bin"]
 name = "c_test"
 
 [[example]]
 name  = "valloc_shell"
-path  = "examples/valloc_shell.rs"
 test  = false
 bench = false

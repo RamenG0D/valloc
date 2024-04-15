@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-#include "valloc.h"
+#include "../valloc.h"
 
 int main(void) {
     // init global allocator
@@ -10,13 +10,13 @@ int main(void) {
     Pointer ptr = valloc(10);
 
     // data buffer
-    uint8_t buffer[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A };
+    uint8_t buffer[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 13, 0x07, 21, 0x09, 0x0A };
 
     // write to memory
     write_buffer(&ptr, buffer, sizeof(buffer));
 
     // read 10 bytes from memory
-    BufferData value = read_buffer(&ptr, sizeof(buffer));
+    DataBuffer value = read_buffer(&ptr, sizeof(buffer));
     for(size_t i = 0; i < value.len; i++) {
         printf("Value: %d\n", value.data[i]);
     }

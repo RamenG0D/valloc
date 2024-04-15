@@ -1,6 +1,10 @@
 use std::process::Command;
 
-fn main() -> Result<(), &'static str> {
+fn main() {
+    println!("Building Library...");
+    Command::new("cargo").args(["build", "--release", "--features", "cbindings"]).spawn().unwrap().wait().unwrap();
+    println!("Library Build Succesful!");
+
     println!("Generating Bindings...");
     Command::new("cbindgen").args([
         "--config", "cbindings.toml", 
@@ -16,8 +20,9 @@ fn main() -> Result<(), &'static str> {
         "-o", "test", 
         "examples/test.c", 
         "-I.", 
-        "-L./target/debug/", 
+        "-L./target/release/", 
         "-lvalloc",
+        "-DC_BINDGEN"
     ]).spawn().unwrap().wait().unwrap();
     println!("Compilation Succesful!");
 
@@ -30,5 +35,4 @@ fn main() -> Result<(), &'static str> {
     println!("Clean Up Succesful!");
 
     println!("Finished Exiting...");
-    Ok(())
 }

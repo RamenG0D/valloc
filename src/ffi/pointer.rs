@@ -1,5 +1,5 @@
-use std::{ops::Index, usize};
 use crate::pointer;
+use std::usize;
 
 #[repr(C)]
 pub struct CPointer {
