@@ -21,7 +21,7 @@ fn create_c_bindings() {
 
     println!("Generating Bindings...");
     Command::new("cbindgen").args([
-        "-o", "./valloc.h", 
+        "-o", "valloc.h", 
         "--config", "cbindings.toml", 
         "--crate", "valloc", 
         "--lang", "c"
