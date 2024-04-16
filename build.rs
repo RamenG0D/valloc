@@ -6,8 +6,7 @@
 #[cfg(feature = "C")]
 fn create_c_bindings() {
     println!("cargo::rerun-if-changed=cbindings.toml");
-    println!("cargo::OUT_DIR={}", std::env::var("OUT_DIR").unwrap());
-    std::process::exit(1);
+    println!("cargo::OUT_DIR={}", std::env::var("OUT_DIR").unwrap().split("/target").collect::<Vec<&str>>()[0]);
 
     println!("Checking for `cbindgen`...");
     if let Err(std::io::ErrorKind::NotFound) = Command::new("cbindgen").arg("--version").spawn().map_err(|e| e.kind()) {
