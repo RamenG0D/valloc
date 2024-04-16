@@ -5,8 +5,8 @@
 
 #[cfg(feature = "C")]
 fn create_c_bindings() {
-    let cwd = Path::new(env!("CARGO_TARGET_DIR"));
-    println!("CWD: {:?}", cwd);
+    println!("cargo::rerun-if-changed=cbindings.toml");
+    println!("cargo::OUT_DIR={}", std::env::var("OUT_DIR").unwrap());
     std::process::exit(1);
 
     println!("Checking for `cbindgen`...");
