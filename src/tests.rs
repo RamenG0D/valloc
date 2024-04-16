@@ -292,6 +292,8 @@ fn many_ptr_stress_test() {
 #[cfg(feature = "C")]
 #[test]
 fn build_header() {
+    use std::process::Command;
+
     println!("Checking for `cbindgen`...");
     if let Err(std::io::ErrorKind::NotFound) = Command::new("cbindgen").arg("--version").spawn().map_err(|e| e.kind()) {
         eprintln!("Failed to Find `cbindgen` is it installed?");
