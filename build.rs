@@ -5,7 +5,7 @@
 
 #[cfg(feature = "C")]
 fn create_c_bindings() {
-    let cwd = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cwd = Path::new(env!("CARGO_BUILD_TARGET_DIR"));
     println!("CWD: {:?}", cwd);
     std::process::exit(1);
 
