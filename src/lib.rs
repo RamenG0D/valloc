@@ -3,7 +3,7 @@ pub mod allocator;
 pub mod pointer;
 pub mod vmem;
 
-#[cfg(feature = "cbindings")]
+#[cfg(feature = "C")]
 pub mod ffi;
 
 #[cfg(test)]

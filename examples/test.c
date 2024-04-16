@@ -6,21 +6,28 @@ int main(void) {
     // init global allocator
     valloc_init(1024);
 
+    typedef struct Inner {
+        uint8_t data[10];
+        float value;
+    } Inner;
+
     // allocate 1 byte of memory (for a ptr)
-    Pointer ptr = valloc(10);
+    Pointer ptr = valloc(sizeof(Inner));
 
-    // data buffer
-    uint8_t buffer[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 13, 0x07, 21, 0x09, 0x0A };
-
-    // write to memory
-    write_buffer(&ptr, buffer, sizeof(buffer));
-
-    // read 10 bytes from memory
-    DataBuffer value = read_buffer(&ptr, sizeof(buffer));
-    for(size_t i = 0; i < value.len; i++) {
-        printf("Value: %d\n", value.data[i]);
+    // write data to the memory block
+    Inner* inner = (Inner*)ptr.address;
+    for (size_t i = 0; i < 10; i++) {
+        inner->data[i] = i;
     }
+    inner->value = 3.14;
 
+    // read data from the memory block
+    for(size_t i = 0; i < 10; i++) {
+        printf("%d ", inner->data[i]);
+    }
+    printf("\n");
+    printf("%f\n", inner->value);
+    
     // free memory
     vfree(&ptr);
 

@@ -1,42 +1,9 @@
-use crate::allocator::Valloc;
+use crate::allocator::get_allocator;
 // its not valid to use generics so we use this CCPointer struct instead its just a CPointer<u8>
 use super::{
     buffer::{new_buffer, DataBuffer},
     pointer::CPointer
 };
-
-// global allocator
-static mut ALLOCATOR: Option<Valloc> = None;
-
-#[no_mangle]
-fn get_allocator() -> &'static mut Valloc {
-    unsafe {
-        match ALLOCATOR {
-            Some(ref mut allocator) => allocator,
-            None => panic!("Allocator not initialized!")
-        }
-    }
-}
-
-#[no_mangle]
-/// Initializes the allocator with the total memory size (in bytes)
-/// 
-/// # Arguments
-/// 
-/// * `total_mem_size` - The total memory size to allocate
-/// 
-/// # Safety
-/// 
-/// The caller must ensure that the allocator is initialized only once
-/// 
-/// 
-pub extern fn valloc_init(total_mem_size: usize) {
-    if unsafe{ALLOCATOR.is_some()} {
-        panic!("Allocator already initialized!");
-    } else {
-        unsafe{ ALLOCATOR = Some(Valloc::new(total_mem_size)); }
-    }
-}
 
 #[no_mangle]
 /// Allocates a memory block of the specified size and returns a pointer to it

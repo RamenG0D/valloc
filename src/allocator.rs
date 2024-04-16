@@ -1,6 +1,57 @@
 use crate::{pointer::Pointer, vmem::{VirtMemory, VirtMemoryChunk}};
 use std::mem::size_of;
 
+// global allocator
+static mut ALLOCATOR: Option<Valloc> = None;
+
+#[no_mangle]
+/// Get a mutable reference to the global allocator
+/// 
+/// # Safety
+/// 
+/// The caller must ensure that the allocator is initialized before calling this function
+/// 
+/// # Example
+/// 
+/// ```
+/// use valloc::allocator::get_allocator;
+/// let allocator = get_allocator();
+/// ```
+/// 
+/// # Returns
+/// 
+/// * `&'static mut Valloc` - A mutable reference to the global allocator
+/// 
+/// # Panics
+/// 
+/// This function will panic if the allocator is not initialized
+pub fn get_allocator() -> &'static mut Valloc {
+    unsafe{match ALLOCATOR {
+        Some(ref mut allocator) => allocator,
+        None => panic!("Allocator not initialized!")
+    }}
+}
+
+#[no_mangle]
+/// Initializes the allocator with the total memory size (in bytes)
+/// 
+/// # Arguments
+/// 
+/// * `total_mem_size` - The total memory size to allocate
+/// 
+/// # Safety
+/// 
+/// The caller must ensure that the allocator is initialized only once
+/// 
+/// 
+pub extern fn valloc_init(total_mem_size: usize) {
+    if unsafe{ALLOCATOR.is_some()} {
+        panic!("Allocator already initialized!");
+    } else {
+        unsafe{ ALLOCATOR = Some(Valloc::new(total_mem_size)); }
+    }
+}
+
 /// The Valloc struct represents a Virtual Memory Allocator.
 /// It will be used to simulate the ability to allocate and deallocate memory.
 /// and is used on a simple stack or heap allocated array of bytes.

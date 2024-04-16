@@ -2,8 +2,22 @@ use std::process::Command;
 
 fn main() {
     println!("Building Library...");
-    Command::new("cargo").args(["build", "--release", "--features", "cbindings"]).spawn().unwrap().wait().unwrap();
+    Command::new("cargo").args(["build", "--release", "--features", "C"]).spawn().unwrap().wait().unwrap();
     println!("Library Build Succesful!");
+
+    println!("Checking for `cbindgen`...");
+    while let Err(std::io::ErrorKind::NotFound) = Command::new("cbindgen").arg("--version").spawn().map_err(|e| e.kind()) {
+        eprintln!("Failed to Find `cbindgen` is it installed?");
+        println!("Do you want to install it? (y/n)");
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+        if input.trim().eq_ignore_ascii_case("y") || input.trim().eq_ignore_ascii_case("yes") {
+            Command::new("cargo").args(["install", "cbindgen"]).spawn().unwrap().wait().unwrap();
+        } else {
+            std::process::exit(1);
+        }
+    }
+    println!("`cbindgen` Found!");
 
     println!("Generating Bindings...");
     Command::new("cbindgen").args([
@@ -11,7 +25,7 @@ fn main() {
         "--crate", "valloc", 
         "--output", "valloc.h", 
         "--lang", "c"
-    ]).spawn().unwrap().wait().unwrap();
+    ]).spawn().unwrap().wait().expect("Failed to generate bindings");
     println!("Binding Generation Succesful!");
 
     println!("Compiling...");

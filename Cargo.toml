@@ -8,7 +8,7 @@ name = "valloc"
 crate-type = ["staticlib"]
 
 [features]
-cbindings = ["dep:cbindgen"]
+C = ["dep:cbindgen"]
 
 [dependencies]
 # not needed for the library, IF you don't need to generate the "C"/"CXX" bindings

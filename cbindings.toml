@@ -56,11 +56,11 @@ documentation_style = "c"
 
 style = "both"
 sort_by = "Name" # default for `fn.sort_by` and `const.sort_by`
-usize_is_size_t = true
+usize_is_size_t = false
 
 
 [defines]
-"feature = cbindings" = "C_BINDGEN"
+"feature = C" = "C_BINDGEN"
 valloc_already_exists_fix = "undef __USE_MISC"
 
 
