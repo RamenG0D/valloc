@@ -1,11 +1,7 @@
-include!("../src/allocator.rs");
-mod vmem { include!("../src/vmem.rs"); }
-mod pointer { include!("../src/pointer.rs"); }
-
-use std::io::Write;
+// use std::io::Write;
 
 fn main() {
-    let mut v = Valloc::new(4096);
+    /*let mut v = Valloc::new(4096);
 
     // a vec that stores the variables
     let mut variables = Vec::new();
@@ -65,5 +61,6 @@ fn main() {
             v.write(&vvalue, value).unwrap();
             println!("{} = {}", vname, value);
         }
-    }
+    }*/
+    panic!("Unavailable for now!")
 }

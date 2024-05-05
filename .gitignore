@@ -2,3 +2,4 @@
 **/*.lock
 *.h
 .vscode
+.devcontainer

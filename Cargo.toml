@@ -18,3 +18,6 @@ name = "c_test"
 name  = "valloc_shell"
 test  = false
 bench = false
+
+[dependencies]
+lazy_static = "1.4.0"

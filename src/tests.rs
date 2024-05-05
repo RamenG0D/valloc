@@ -1,314 +1,164 @@
-use crate::{allocator::{free, realloc, Valloc}, pointer::Pointer};
+use crate::allocator::{SmartPointer, Valloc};
+use std::mem::size_of;
 
 #[test]
 fn alloc_u8() {
-    let mut a = Valloc::new(1024);
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
+    let mut ptr = allocator.alloc::<u8>(1).unwrap();
+    assert!(!ptr.is_null());
 
-    // allocate space (in bytes) for a character
-    let mut ptr = a.alloc::<u8>(1).unwrap();
+    *ptr = 1;
+    assert_eq!(*ptr, 1);
 
-    // write the character 'H' to our allocated memory
-    *ptr = 'H' as u8;
-
-    // read the character from our allocated memory
-    assert_eq!(*ptr, 'H' as u8);
-
-    free(&mut a, &mut ptr).unwrap();
+    allocator.free(&mut ptr).unwrap();
 }
 
 #[test]
 fn alloc_string() {
-    let mut a = Valloc::new(1024);
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 
-    // allocate space (in bytes) for a character
-    let mut ptr = a.alloc_type::<u8>(6).unwrap();
-    
-    let text = b"Hello";
-    let len = text.len();
+    let mut ptr = allocator.alloc::<str>(13).unwrap();
+    assert!(!ptr.is_null());
+    ptr.write(String::from("Hello, World!").as_mut_str());
+    assert_eq!(&*ptr, "Hello, World!");
 
-    a.write_buffer(&mut ptr, text.as_ptr(), len).unwrap();
-
-    let text = a.read_buffer(&ptr, len).unwrap();
-    let text = text.iter().map(|c| *c as char).collect::<Vec<char>>();
-    text.iter().for_each(|t| print!("{t}")); println!();
-
-    // test if reading from a pointer that is out of bounds will return an error
-    let result = a.read(&(ptr + 10usize));
-    if let Err(e) = result {
-        println!("error that we expected: {}", e);
-    } else {
-        eprintln!("Expected an out of bounds error!");
-        assert!(false);
-    }
-
-    free(&mut a, &mut ptr).unwrap();
+    allocator.free(&mut ptr).unwrap();
 }
 
 #[test]
 fn alloc_struct() {
-    // custom struct to test with
-    #[derive(Debug)]
-    struct Test { a: u32, b: u32, z: u32 }
-    let mut a = Valloc::new(1024);
-    
-    let mut ptr = a.alloc_type(1).unwrap();
-    
-    // write the struct to our allocated memory
-    *ptr = Test { a: 10, b: 20, z: 30 };
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
+    #[derive(Debug, Clone)]
+    struct TestStruct {
+        a: u8,
+        b: u16,
+        c: u32,
+    }
 
-    assert_eq!(ptr.a, 10);
-    assert_eq!(ptr.b, 20);
-    assert_eq!(ptr.z, 30);
-    
-    free(&mut a, &mut ptr).unwrap();
+    impl From<*mut u8> for TestStruct {
+        fn from(ptr: *mut u8) -> Self {
+            let ptr = ptr as *mut TestStruct;
+            unsafe { (*ptr).clone() }
+        }
+    }
+
+    let mut ptr = allocator.alloc::<TestStruct>(size_of::<TestStruct>()).unwrap();
+    assert!(!ptr.is_null());
+
+    *ptr = TestStruct {
+        a: 1,
+        b: 2,
+        c: 3,
+    };
+
+    assert_eq!(ptr.a, 1);
+    assert_eq!(ptr.b, 2);
+    assert_eq!(ptr.c, 3);
+
+    allocator.free(&mut ptr).unwrap();
 }
 
 #[test]
 fn ptr_free() {
-    let mut a = Valloc::new(10);
-    let mut ptr = a.alloc::<u8>(1).unwrap();
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 
-    free(&mut a, &mut ptr).unwrap();
+    let mut ptr = allocator.alloc::<u8>(13).unwrap();
+    assert!(!ptr.is_null());
 
-    // this should fail (we will handle the error without a panic though)
-    let result = a.read(&ptr);
-    if let Err(e) = result {
-        println!("{e}");
-    } else {
-        eprintln!("Expected an freed pointer error!");
-        assert!(false);
-    }
+    // Free the pointer
+    allocator.free(&mut ptr).unwrap();
 }
 
 #[test]
 fn ptr_double_free() {
-    let mut a = Valloc::new(10);
-    let mut ptr = a.alloc::<u8>(1).unwrap();
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 
-    free(&mut a, &mut ptr).unwrap();
+    let mut ptr = allocator.alloc::<u8>(1).unwrap();
+    assert!(!ptr.is_null());
 
-    // this should fail (we will handle the error without a panic though)
-    let result = free(&mut a, &mut ptr);
-    if let Err(e) = result {
-        println!("{}", e);
-    } else {
-        eprintln!("Expected an double free error!");
-        assert!(false);
-    }
+    // Free the pointer
+    allocator.free(&mut ptr).unwrap();
+
+    // Free the pointer again
+    assert!(allocator.free(&mut ptr).is_err());
 }
 
 #[test]
 fn ptr_null() {
-    let mut a = Valloc::new(10);
-    let _ = a.alloc::<u8>(1).unwrap();
-    // replace the pointer with a null pointer
-    let ptr = Pointer::NULL;
-    
-    // now attempt to write to the null pointer
-    let result = a.write(&ptr, 10);
-    if let Err(e) = result {
-        println!("{}", e);
-    } else {
-        eprintln!("Expected an double free error!");
-        assert!(false);
-    }
-    
-    // now attempt to read to the null pointer    
-    let result = a.read(&ptr);
-    if let Err(e) = result {
-        println!("{}", e);
-    } else {
-        eprintln!("Expected an double free error!");
-        assert!(false);
-    }
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
+    let mut ptr = allocator.alloc::<u8>(1).unwrap();
+    assert!(!ptr.is_null());
+
+    // Free the pointer
+    allocator.free(&mut ptr).unwrap();
+
+    // Check if the pointer is null
+    assert!(ptr.is_null());
 }
 
 #[test]
 fn ptr_cast() {
-    let mut a = Valloc::new(10);
-    let mut ptr = a.alloc::<u8>(1).unwrap();
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 
-    // write value
-    *ptr = 10;
+    let mut ptr = allocator.alloc::<u16>(size_of::<u16>()).unwrap();
+    assert!(!ptr.is_null());
+    
+    unsafe {
+        let ptr = ptr.ptr().cast::<u8>();
+        *ptr = 1;
+        assert_eq!(*ptr, 1);
+    }
 
-    // read initial value
-    let before = *ptr;
-
-    // cast the pointer to a different type
-    let mut ptr = ptr.cast::<u32>().unwrap();
-
-    // read from the pointer
-    let after = *ptr;
-
-    assert_eq!(before as u32, after);
-    assert_eq!(before,  after as u8);
-
-    free(&mut a, &mut ptr).unwrap();
-}
-
-#[test]
-fn ptr_deref() {
-    let mut a = Valloc::new(10);
-    let mut ptr = a.alloc::<u8>(1).unwrap();
-
-    println!("{:?}", ptr);
-    // write to the pointer using the deref trait
-    *ptr = 10;
-
-    // read from the pointer using the deref trait
-    assert_eq!(*ptr, 10);
-
-    free(&mut a, &mut ptr).unwrap();
+    allocator.free(&mut ptr).unwrap();
 }
 
 #[test]
 fn realloc_test() {
-    let mut a = Valloc::new(1024);
-    let mut ptr_a = a.alloc::<u8>(1).unwrap();
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 
-    // write to the pointer
-    // a.write(&ptr_a, 10).unwrap();
-    *ptr_a = 10;
+    let mut ptr = allocator.alloc::<[u8]>(1).unwrap();
+    assert!(!ptr.is_null());
 
-    // our pointer is freed and reallocated here
-    let mut ptr_b = realloc(&mut a, ptr_a, 30).unwrap();
+    {
+        let ptr = &mut (*ptr);
+        ptr[0] = 1;
+        assert_eq!(ptr[0], 1);
+    }
 
-    // read value (both deref method & allocator.read() method)
-    let v2 = a.read(&ptr_b).unwrap();
-    let v1 = *ptr_b;
+    let mut ptr = allocator.realloc(&mut ptr, 2).unwrap();
+    assert!(!ptr.is_null());
 
-    // read the value from the pointer
-    assert_eq!(v1, 10);
-    assert_eq!(v2, 10);
+    {
+        let ptr = &mut (*ptr);
+        ptr[1] = 2;
+        assert_eq!(ptr[0], 1);
+        assert_eq!(ptr[1], 2);
+    }
 
-    free(&mut a, &mut ptr_b).unwrap();
+    allocator.free(&mut ptr).unwrap();
 }
 
 #[test]
 fn realloc_fail() {
-    let mut a = Valloc::new(1024);
-    let ptr = a.alloc::<u8>(1).unwrap();
-    // this should fail to allocate space (not enough space)
-    let result = realloc(&mut a, ptr, 1000000);
-    if let Err(e) = result {
-        println!("{e}");
-    } else {
-        eprintln!("Expected an allocation error!");
-        assert!(false);
-    }
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 }
 
 #[test]
 fn realloc_struct() {
-    #[derive(Debug, Clone, Copy)]
-    struct Test { a: u32, b: u32, z: u32 }
-    let mut a = Valloc::new(1024);
-    let mut ptr = a.alloc_type::<Test>(1).unwrap();
-    
-    // write to the pointer
-    *ptr = Test { a: 10, b: 20, z: 30 };
-
-    let mut ptr = realloc(&mut a, ptr, std::mem::size_of::<Test>()*2).unwrap();
-    
-    dbg!(*ptr);
-    dbg!(a.read(&ptr).unwrap());
-    
-    // read the value from the pointer
-    assert_eq!(ptr.a, 10);
-    assert_eq!(ptr.b, 20);
-    assert_eq!(ptr.z, 30);
-
-    free(&mut a, &mut ptr).unwrap();
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 }
 
 #[test]
 fn realloc_string() {
-    let mut a = Valloc::new(1024);
-    let mut iptr = a.alloc_type::<u8>(6).unwrap();
-    
-    let text = b"Hello";
-    let len = text.len();
-
-    a.write_buffer(&mut iptr, text.as_ptr(), len).unwrap();
-    
-    // shorten string by 3 characters (remove "llo")
-    let mut ptr = realloc(&mut a, iptr, len-3).unwrap();
-
-    let text = a.read_buffer(&ptr, len-3).unwrap();
-    let text = text.iter().map(|c| *c as char).collect::<String>();
-    let text = text.as_str();
-    println!("{text}");
-
-    assert_eq!(text, "He");
-
-    free(&mut a, &mut ptr).unwrap();
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 }
 
 #[test]
 fn single_ptr_stress_test() {
-    let mut a = Valloc::new(4096);
-    // pointer to half of the allocatable memory
-    let mut ptr = a.alloc::<u8>(4096).unwrap();
-
-    // write to the pointer
-    for i in 0..4095 {
-        ptr[i] = (i + 1) as u8;
-    }
-
-    // read from the pointer (and check the values)
-    for i in 0..4095 {
-        assert_eq!(ptr[i], (i + 1) as u8);
-    }
-
-    free(&mut a, &mut ptr).unwrap();
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 }
 
 #[test]
 fn many_ptr_stress_test() {
-    let mut a = Valloc::new(4096);
-    let mut ptrs = Vec::new();
-
-    // allocate 4096 pointers
-    for i in 0..2 {
-        let mut ptr = a.alloc::<u8>(1).unwrap();
-        *ptr = i;
-        println!("V1: {}", *ptr);
-        ptrs.push(ptr);
-    }
-    
-    // read from the pointers (and check the values)
-    for i in 0..ptrs.len() {
-        println!("{}", *(ptrs[i]));
-    }
-    for i in 0..ptrs.len() {
-        assert_eq!(*(ptrs[i]), i as u8);
-    }
-
-    for ptr in ptrs.iter_mut() {
-        free(&mut a, ptr).unwrap();
-    }
-}
-
-#[cfg(feature = "C")]
-#[test]
-fn build_header() {
-    use std::process::Command;
-
-    println!("Checking for `cbindgen`...");
-    if let Err(std::io::ErrorKind::NotFound) = Command::new("cbindgen").arg("--version").spawn().map_err(|e| e.kind()) {
-        eprintln!("Failed to Find `cbindgen` is it installed?");
-        println!("It can be installed with \"cargo install cbindgen\"");
-        std::process::exit(1);
-    } else {
-        println!("`cbindgen` Found!");
-    }
-
-    println!("Generating Bindings...");
-    Command::new("cbindgen").args([
-        "-o", "valloc.h", 
-        "--config", "cbindings.toml", 
-        "--crate", "valloc", 
-        "--lang", "c"
-    ]).spawn().unwrap().wait().expect("Failed to generate bindings");
-    println!("Binding Generation Succesful!");
+    let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 }

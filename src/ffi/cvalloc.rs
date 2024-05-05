@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use crate::allocator::get_allocator;
 // its not valid to use generics so we use this CCPointer struct instead its just a CPointer<u8>
 use super::{
@@ -28,7 +30,7 @@ use super::{
 /// CPointer ptr = valloc(10);
 /// ```
 pub extern fn valloc(size: usize) -> CPointer {
-    let mut ptr = get_allocator().alloc::<u8>(size).unwrap();
+    let mut ptr = get_allocator().unwrap().alloc::<u8>(size).unwrap();
     let addr = ptr.address_mut().unwrap();
     let (address, len) = (addr.as_mut_ptr(), addr.len());
     CPointer::new(address, len, ptr.get_index().unwrap())
@@ -58,7 +60,8 @@ pub extern fn valloc(size: usize) -> CPointer {
 /// printf("Value at ptr: %d\n", vread(&ptr)); // doing this will result in undefined behavior
 /// ```
 pub extern fn vfree(ptr: &mut CPointer) {
-    get_allocator().free::<u8>(&mut Into::<crate::pointer::Pointer<u8>>::into(ptr)).unwrap();
+    let mut ptr = Into::<crate::pointer::Pointer<u8>>::into(ptr);
+    get_allocator().unwrap().free::<u8>(&mut ptr).unwrap();
 }
 
 #[no_mangle]
@@ -79,22 +82,24 @@ pub extern fn vfree(ptr: &mut CPointer) {
 /// ```c
 /// 
 pub extern fn vwrite(ptr: &mut CPointer, value: u8) {
-    get_allocator().write(&mut Into::<crate::pointer::Pointer<u8>>::into(ptr), value).unwrap();
+    get_allocator().unwrap().write(&mut Into::<crate::pointer::Pointer<u8>>::into(ptr), value).unwrap();
 }
 
 #[no_mangle]
-pub extern fn vread(ptr: &CPointer) -> u8 {
-    get_allocator().read(&Into::<crate::pointer::Pointer<u8>>::into(ptr)).unwrap()
+pub unsafe extern fn vread(ptr: &CPointer) -> *mut c_void {
+    let ptr = Into::<crate::pointer::Pointer<u8>>::into(ptr);
+    std::mem::transmute::<_, *mut c_void>(get_allocator().unwrap().read_mut(&ptr).unwrap())
 }
 
 #[no_mangle]
 pub extern fn read_buffer(ptr: &CPointer, size: usize) -> DataBuffer {
-    let buffer = get_allocator().read_buffer(&mut Into::<crate::pointer::Pointer<u8>>::into(ptr), size).unwrap().leak();
+    let mut ptr = Into::<crate::pointer::Pointer<u8>>::into(ptr);
+    let buffer = get_allocator().unwrap().read_buffer(&mut ptr, size).unwrap().iter().map(|x| **x).collect::<Vec<_>>().leak();
     let (ptr, len) = (buffer.as_mut_ptr(), buffer.len());
     new_buffer(ptr, len)
 }
 
 #[no_mangle]
 pub extern "C" fn write_buffer(ptr: &mut CPointer, data: *mut u8, length: usize) {
-    get_allocator().write_buffer(&mut Into::<crate::pointer::Pointer<u8>>::into(ptr), data, length).unwrap();
+    get_allocator().unwrap().write_buffer(&mut Into::<crate::pointer::Pointer<u8>>::into(ptr), data, length).unwrap();
 }
