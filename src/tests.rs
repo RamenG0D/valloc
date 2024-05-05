@@ -17,10 +17,12 @@ fn alloc_u8() {
 fn alloc_string() {
     let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 
-    let mut ptr = allocator.alloc::<str>(13).unwrap();
+    let mut ptr = allocator.alloc::<&str>(13).unwrap();
     assert!(!ptr.is_null());
-    ptr.write(String::from("Hello, World!").as_mut_str());
-    assert_eq!(&*ptr, "Hello, World!");
+
+    *ptr = "Hello, World!";
+
+    assert_eq!(*ptr, "Hello, World!");
 
     allocator.free(&mut ptr).unwrap();
 }
@@ -33,13 +35,6 @@ fn alloc_struct() {
         a: u8,
         b: u16,
         c: u32,
-    }
-
-    impl From<*mut u8> for TestStruct {
-        fn from(ptr: *mut u8) -> Self {
-            let ptr = ptr as *mut TestStruct;
-            unsafe { (*ptr).clone() }
-        }
     }
 
     let mut ptr = allocator.alloc::<TestStruct>(size_of::<TestStruct>()).unwrap();
@@ -116,20 +111,20 @@ fn ptr_cast() {
 fn realloc_test() {
     let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 
-    let mut ptr = allocator.alloc::<[u8]>(1).unwrap();
+    let mut ptr = allocator.alloc::<u8>(1).unwrap();
     assert!(!ptr.is_null());
 
     {
-        let ptr = &mut (*ptr);
-        ptr[0] = 1;
-        assert_eq!(ptr[0], 1);
+        let ptr = unsafe{std::slice::from_raw_parts_mut(ptr.ptr(), 1)};
+        (*ptr)[0] = 1;
+        assert_eq!((*ptr)[0], 1);
     }
 
     let mut ptr = allocator.realloc(&mut ptr, 2).unwrap();
     assert!(!ptr.is_null());
 
     {
-        let ptr = &mut (*ptr);
+        let ptr = unsafe{std::slice::from_raw_parts_mut(ptr.ptr(), 2)};
         ptr[1] = 2;
         assert_eq!(ptr[0], 1);
         assert_eq!(ptr[1], 2);
