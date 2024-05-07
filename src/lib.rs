@@ -1,5 +1,7 @@
+#![feature(generic_arg_infer)]
+#![feature(allocator_api)]
+
 pub mod allocator;
-pub mod vmem;
 
 #[cfg(feature = "C")]
 pub mod ffi;
