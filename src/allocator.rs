@@ -1,7 +1,22 @@
-use std::{collections::LinkedList, ptr::NonNull};
+use std::{alloc::Allocator, collections::LinkedList, ptr::NonNull};
 
 // global allocator
 static mut ALLOCATOR: Option<Valloc> = None;
+
+unsafe impl Allocator for &mut Valloc {
+    fn allocate(&self, layout: std::alloc::Layout) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
+        crate::allocator::alloc::<[u8]>(crate::allocator::get_allocator().unwrap(), layout.size())
+            .map(|ptr| ptr.non_null_ptr())
+            .map_err(|_| std::alloc::AllocError)
+    }
+
+    unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, _layout: std::alloc::Layout) {
+        crate::allocator::free(
+            crate::allocator::get_allocator().unwrap(), 
+            SmartPointer::new(ptr)
+        ).unwrap();
+    }
+}
 
 // convenience type for a pointer
 pub struct SmartPointer<T> 
@@ -19,6 +34,10 @@ impl<T> SmartPointer<T>
 
     pub fn as_ptr(&self) -> *mut T {
         self.ptr.as_ptr()
+    }
+
+    pub fn non_null_ptr(&self) -> NonNull<T> {
+        self.ptr
     }
 
     pub fn cast<U: Sized>(&self) -> SmartPointer<U> {
@@ -199,6 +218,15 @@ impl ChunkNode {
     }
 }
 
+impl From<Vec<u8>> for Valloc {
+    fn from(memory: Vec<u8>) -> Self {
+        let (len, mem) = (
+            memory.len(), memory.leak()
+        );
+        Valloc::new(mem, len)
+    }
+}
+
 impl Valloc {
     /// Create a new Kernel instance from existing memory.
     /// 
@@ -273,6 +301,31 @@ impl Valloc {
         realloc(self, ptr, new_size)
     }
 
+    /// # Description
+    /// 
+    /// Allocate a new array of T.
+    /// This just makes sure that the new size is a multiple of the size of T.
+    /// and allows rust to enforce slice (array) safety.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `new_size` - The new size of the array, in bytes.
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(*mut [T])` - A pointer to the start of the allocated array if successful.
+    /// * `Err(String)` - An error message if allocation fails.
+    /// 
+    /// # Note
+    /// 
+    /// This method DOES `NOT` allocate in bytes!
+    /// It allocates in multiples of the size of T.
+    pub fn alloc_array<T: Sized>(&mut self, new_size: usize) -> Result<SmartPointer<[T]>, String> {
+        // because its sized we can check if the new size is a multiple of the size of T if it is then we can use alloc and safely cast the pointer to an array of T
+        let ptr = self.alloc::<[T]>(new_size * std::mem::size_of::<T>())?;
+        Ok(ptr)
+    }
+
     /// Deallocate a MemoryChunk instance.
     /// 
     /// This method removes a MemoryChunk instance from the chunks vector.
@@ -293,7 +346,9 @@ impl Valloc {
 }
 
 pub fn alloc<T: ?Sized>(vallocator: &mut Valloc, size: usize) -> Result<SmartPointer<T>, &'static str> {
-    debug_assert!(size > 0, "Size must be greater than 0!");
+    // only check if not release
+    #[cfg(debug_assertions)]
+    if size == 0 { return Err("Size must be greater than 0!"); }
 
     // first we need to check if there is enough space in the memory
     if size > vallocator.len {
