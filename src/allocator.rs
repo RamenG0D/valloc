@@ -1,4 +1,4 @@
-use std::collections::LinkedList;
+use std::{collections::LinkedList, ptr::NonNull};
 
 // global allocator
 static mut ALLOCATOR: Option<Valloc> = None;
@@ -7,33 +7,22 @@ static mut ALLOCATOR: Option<Valloc> = None;
 pub struct SmartPointer<T> 
     where T: ?Sized
 {
-    ptr: Option<*mut T>
+    ptr: NonNull<T>,
 }
 
 impl<T> SmartPointer<T> 
     where T: ?Sized
 {
-    pub fn new(ptr: Option<*mut T>) -> Self {
+    pub fn new(ptr: NonNull<T>) -> Self {
         Self {ptr}
     }
-    
-    #[allow(invalid_value)]
-    pub fn null() -> Self {
-        Self {ptr: None}
-    }
-    
-    pub fn is_null(&self) -> bool {
-        self.ptr.is_none()
+
+    pub fn as_ptr(&self) -> *mut T {
+        self.ptr.as_ptr()
     }
 
-    pub fn ptr(&self) -> Option<*mut T> {
-        self.ptr
-    }
-
-    pub fn cast<U>(&self) -> SmartPointer<U> 
-        where U: ?Sized
-    {
-        self.ptr.map(|ptr| (ptr as *mut U)).unwrap_or(SmartPointer::null())
+    pub fn cast<U: Sized>(&self) -> SmartPointer<U> {
+        SmartPointer::new(self.ptr.cast())
     }
 }
 
@@ -43,7 +32,7 @@ impl<T> std::ops::Deref for SmartPointer<T>
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { self.ptr.expect("Pointer is null!").as_ref().expect("Unable to dereference pointer!") }
+        unsafe { self.ptr.as_ref() }
     }
 }
 
@@ -51,7 +40,7 @@ impl<T> std::ops::DerefMut for SmartPointer<T>
     where T: ?Sized
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.ptr.expect("Pointer is null!").as_mut().expect("Unable to dereference pointer!") }
+        unsafe { self.ptr.as_mut() }
     }
 }
 
@@ -59,13 +48,13 @@ impl<T> std::ops::Index<usize> for SmartPointer<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        unsafe { &*self.ptr.expect("Pointer is null!").offset(index as isize) }
+        unsafe { &*self.ptr.offset(index as isize).as_ptr() }
     }
 }
 
 impl<T> std::ops::IndexMut<usize> for SmartPointer<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        unsafe { &mut *self.ptr.expect("Pointer is null!").offset(index as isize) }
+        unsafe { &mut *self.ptr.offset(index as isize).as_ptr() }
     }
 }
 
@@ -196,8 +185,13 @@ impl ChunkNode {
         Self { ptr, size, in_use }
     }
 
-    pub fn get_ptr(&self) -> *mut u8 {
-        self.ptr
+    pub fn get_ptr<T: Sized>(&self) -> *mut T
+    {
+        self.ptr as *mut T
+    }
+
+    pub fn ptr_unsized<T: ?Sized>(&self) -> &*mut T {
+        unsafe{ std::mem::transmute(&self.ptr) }
     }
     
     pub fn get_size(&self) -> usize {
@@ -258,7 +252,7 @@ impl Valloc {
     /// # Note
     /// 
     /// This method allocates in bytes.
-    pub fn alloc<T: ?Sized + Sized>(&mut self, size: usize) -> Result<SmartPointer<T>, &'static str> {
+    pub fn alloc<T: ?Sized>(&mut self, size: usize) -> Result<SmartPointer<T>, &'static str> {
         alloc(self, size)
     }
 
@@ -275,7 +269,7 @@ impl Valloc {
     /// 
     /// * `Ok(*mut T)` - A pointer to the reallocated memory chunk if successful.
     /// * `Err(String)` - An error message if reallocation fails.
-    pub fn realloc<T>(&mut self, ptr: &mut SmartPointer<T>, new_size: usize) -> Result<SmartPointer<T>, String> {
+    pub fn realloc<T: ?Sized>(&mut self, ptr: SmartPointer<T>, new_size: usize) -> Result<SmartPointer<T>, String> {
         realloc(self, ptr, new_size)
     }
 
@@ -293,12 +287,12 @@ impl Valloc {
     /// 
     /// * `Ok(())` - If deallocation is successful.
     /// * `Err(String)` - An error message if deallocation fails.
-    pub fn free<T>(&mut self, ptr: &mut SmartPointer<T>) -> Result<(), String> {
+    pub fn free<T: ?Sized>(&mut self, ptr: SmartPointer<T>) -> Result<(), String> {
         free(self, ptr)
     }
 }
 
-pub fn alloc<T>(vallocator: &mut Valloc, size: usize) -> Result<SmartPointer<T>, &'static str> {
+pub fn alloc<T: ?Sized>(vallocator: &mut Valloc, size: usize) -> Result<SmartPointer<T>, &'static str> {
     debug_assert!(size > 0, "Size must be greater than 0!");
 
     // first we need to check if there is enough space in the memory
@@ -315,7 +309,7 @@ pub fn alloc<T>(vallocator: &mut Valloc, size: usize) -> Result<SmartPointer<T>,
     if chunk.size > size {
         // we need to split the chunk
         new_chunk = Some(Box::new(ChunkNode::new(
-            (chunk.get_ptr() as usize + size) as *mut u8,
+            (chunk.get_ptr::<u8>() as usize + size) as *mut u8,
             chunk.size - size,
             false
         )));
@@ -325,8 +319,13 @@ pub fn alloc<T>(vallocator: &mut Valloc, size: usize) -> Result<SmartPointer<T>,
 
     // now we need to set the chunk to in use
     chunk.in_use = true;
-    // wrap the pointer in a MaybeUninit
-    let ptr = chunk.get_ptr();
+    // and get the pointer to the chunk
+    let ptr: SmartPointer<T> = {
+        let ptr = chunk.ptr_unsized::<T>();
+        SmartPointer::new(
+            NonNull::new(*ptr).expect("Failed to create SmartPointer!")
+        )
+    };
 
     // and update the available size    
     vallocator.chunks.available -= size;
@@ -338,27 +337,19 @@ pub fn alloc<T>(vallocator: &mut Valloc, size: usize) -> Result<SmartPointer<T>,
     }
 
     // return the unsized type pointer
-    Ok(SmartPointer::new(Some(ptr as *mut T)))
+    Ok(ptr)
 }
 
-pub fn free<T>(vallocator: &mut Valloc, ptr: &mut SmartPointer<T>) -> Result<(), String> {
-    if ptr.is_null() { return Err(format!("Pointer is null: Cannot free a null or already freed pointer!")); }
-    let pptr = ptr.ptr().unwrap();
-
-    // first we need to check if the pointer is in the memory
-    if (pptr as *mut u8) < vallocator.memory || (pptr as *mut u8) >= (vallocator.memory as usize + vallocator.len) as *mut u8 {
-        return Err(format!("Pointer is not in memory: SmartPointer:{{{:#X}}}", (pptr as *const u8) as usize));
-    }
-
+pub fn free<T: ?Sized>(vallocator: &mut Valloc, ptr: SmartPointer<T>) -> Result<(), String> {
     // now we need to check if the pointer is in the chunks
     let mut iter = vallocator.chunks.iter_mut().peekable();
     // check for any adjacent chunks that are not in use
     // and merge them with the current chunk
     while let Some(chunk) = iter.next() {
-        if chunk.get_ptr() == (pptr as *mut u8) {
+        if chunk.get_ptr() == (ptr.as_ptr() as *mut u8) {
             // check if the chunk is in use
             if !chunk.in_use {
-                return Err(format!("Pointer is not in use: SmartPointer:{{{:#X}}}, Maybe it was already freed?", (pptr as *mut u8) as usize));
+                return Err(format!("Pointer is not in use: SmartPointer:{{{:#X}}}, Maybe it was already freed?", (ptr.as_ptr() as *mut u8) as usize));
             }
 
             // check if the next chunk is not in use
@@ -387,24 +378,18 @@ pub fn free<T>(vallocator: &mut Valloc, ptr: &mut SmartPointer<T>) -> Result<(),
             // and update the available size
             vallocator.chunks.available += chunk.get_size();
 
-            // set the pointer to null
-            *ptr = SmartPointer::null();
-
             return Ok(());
         }
     }
 
     // then we need to check if the pointer is in the chunks
-    Err(format!("Pointer is not in use: SmartPointer:{{{:#X}}}, Maybe it was already freed?", (pptr as *mut u8) as usize))
+    Err(format!("Pointer is not in use: SmartPointer:{{{:#X}}}, Maybe it was already freed?", (ptr.as_ptr() as *mut u8) as usize))
 }
 
-pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: &mut SmartPointer<T>, nsize: usize) -> Result<SmartPointer<T>, String> {
-    if ptr.is_null() { return Err(format!("Pointer is null: Cannot reallocate a null pointer!")); }
-    let pptr = ptr.ptr().unwrap();
-
+pub fn realloc<T: ?Sized>(vallocator: &mut Valloc, ptr: SmartPointer<T>, nsize: usize) -> Result<SmartPointer<T>, String> {
     // first we need to check if the pointer is in the memory
-    if (pptr as *mut u8) < vallocator.memory || (pptr as *mut u8) >= (vallocator.memory as usize + vallocator.len) as *mut u8 {
-        return Err(format!("Pointer is not in memory: SmartPointer:{{{:#X}}}", (pptr as *const u8) as usize));
+    if (ptr.as_ptr() as *mut u8) < vallocator.memory || (ptr.as_ptr() as *mut u8) >= (vallocator.memory as usize + vallocator.len) as *mut u8 {
+        return Err(format!("Pointer is not in memory: SmartPointer:{{{:#X}}}", (ptr.as_ptr() as *const u8) as usize));
     }
 
     // now we let the other functions `alloc` and `free` do all the heavy lifting here :D
@@ -413,20 +398,23 @@ pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: &mut SmartPointer<T>, nsize:
     // and lastly we just free the old chunk
 
     let lsize = vallocator.chunks.iter()
-        .find(|x| x.get_ptr() == pptr as *mut u8)
-        .ok_or(format!("Pointer not found in chunks: SmartPointer:{{{:#X}}}", (pptr as *mut u8) as usize))?
+        .find(|x| x.get_ptr() == ptr.as_ptr() as *mut u8)
+        .ok_or(format!("Pointer not found in chunks: SmartPointer:{{{:#X}}}", (ptr.as_ptr() as *mut u8) as usize))?
         .get_size();
 
     // allocate a new chunk of size (nsize)
-    let mut nptr = alloc(vallocator, nsize)?;
-    // copy the data from the old chunk to the new chunk
-    unsafe {
-    std::ptr::copy_nonoverlapping::<SmartPointer<T>>(ptr, &mut nptr, lsize);
+    let nptr: SmartPointer<T> = alloc(vallocator, nsize)?;
+    {
+        // copy the data from the old chunk to the new chunk
+        // first we are going to reinterpret the pointers as u8 pointers
+        let (optr, nptr) = (ptr.as_ptr() as *mut u8, nptr.as_ptr() as *mut u8);
+        // then we are going to copy the data from the old chunk to the new chunk
+        unsafe { std::ptr::copy(optr, nptr, lsize * std::mem::size_of::<u8>()); }
     }
 
     // free the old chunk
-    free(vallocator, &mut ptr)?;
+    free(vallocator, ptr)?;
 
     // return the new pointer
-    Ok(SmartPointer::new(nptr.ptr()))
+    Ok(nptr)
 }
