@@ -95,14 +95,12 @@ fn ptr_null() {
 fn ptr_cast() {
     let mut allocator = Valloc::new(vec![0; 1024].leak(), 1024);
 
-    let mut ptr = allocator.alloc::<u16>(size_of::<u16>()).unwrap();
+    let ptr = allocator.alloc::<u16>(size_of::<u16>()).unwrap();
     assert!(!ptr.is_null());
-    
-    unsafe {
-        let ptr = ptr.ptr().cast::<u8>();
-        *ptr = 1;
-        assert_eq!(*ptr, 1);
-    }
+
+    let mut ptr = ptr.cast::<u8>();
+    *ptr = 1;
+    assert_eq!(*ptr, 1);
 
     allocator.free(&mut ptr).unwrap();
 }
@@ -114,11 +112,9 @@ fn realloc_test() {
     let mut ptr = allocator.alloc::<u8>(1).unwrap();
     assert!(!ptr.is_null());
 
-    {
-        let ptr = unsafe{std::slice::from_raw_parts_mut(ptr.ptr(), 1)};
-        (*ptr)[0] = 1;
-        assert_eq!((*ptr)[0], 1);
-    }
+    let ptr = ptr.cast::<[u8]>();
+    (*ptr)[0] = 1;
+    assert_eq!((*ptr)[0], 1);
 
     let mut ptr = allocator.realloc(&mut ptr, 2).unwrap();
     assert!(!ptr.is_null());

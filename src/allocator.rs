@@ -7,44 +7,33 @@ static mut ALLOCATOR: Option<Valloc> = None;
 pub struct SmartPointer<T> 
     where T: ?Sized
 {
-    ptr: *mut T
-}
-
-impl<T> From<*mut u8> for SmartPointer<T> {
-    fn from(value: *mut u8) -> Self {
-        Self { ptr: value as *mut T }
-    }
-}
-
-impl<T: ?Sized> From<SmartPointer<T>> for *mut u8 {
-    fn from(value: SmartPointer<T>) -> Self {
-        value.ptr as *mut u8
-    }
+    ptr: Option<*mut T>
 }
 
 impl<T> SmartPointer<T> 
-    where T: Sized
+    where T: ?Sized
 {
-    pub fn new(ptr: *mut T) -> Self {
+    pub fn new(ptr: Option<*mut T>) -> Self {
         Self {ptr}
     }
     
     #[allow(invalid_value)]
     pub fn null() -> Self {
-        Self {ptr: std::ptr::null_mut()}
+        Self {ptr: None}
     }
     
-    #[allow(useless_ptr_null_checks)]
     pub fn is_null(&self) -> bool {
-        self.ptr.is_null()
+        self.ptr.is_none()
     }
 
-    pub fn ptr(&self) -> *mut T {
+    pub fn ptr(&self) -> Option<*mut T> {
         self.ptr
     }
 
-    pub fn cast<U>(&self) -> SmartPointer<U> {
-        SmartPointer::new(self.ptr as *mut U)
+    pub fn cast<U>(&self) -> SmartPointer<U> 
+        where U: ?Sized
+    {
+        self.ptr.map(|ptr| (ptr as *mut U)).unwrap_or(SmartPointer::null())
     }
 }
 
@@ -54,7 +43,7 @@ impl<T> std::ops::Deref for SmartPointer<T>
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { self.ptr.as_ref().unwrap() }
+        unsafe { self.ptr.expect("Pointer is null!").as_ref().expect("Unable to dereference pointer!") }
     }
 }
 
@@ -62,7 +51,7 @@ impl<T> std::ops::DerefMut for SmartPointer<T>
     where T: ?Sized
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.ptr.as_mut().unwrap() }
+        unsafe { self.ptr.expect("Pointer is null!").as_mut().expect("Unable to dereference pointer!") }
     }
 }
 
@@ -70,13 +59,13 @@ impl<T> std::ops::Index<usize> for SmartPointer<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        unsafe { &*self.ptr.offset(index as isize) }
+        unsafe { &*self.ptr.expect("Pointer is null!").offset(index as isize) }
     }
 }
 
 impl<T> std::ops::IndexMut<usize> for SmartPointer<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        unsafe { &mut *self.ptr.offset(index as isize) }
+        unsafe { &mut *self.ptr.expect("Pointer is null!").offset(index as isize) }
     }
 }
 
@@ -349,15 +338,16 @@ pub fn alloc<T>(vallocator: &mut Valloc, size: usize) -> Result<SmartPointer<T>,
     }
 
     // return the unsized type pointer
-    Ok(SmartPointer::new(ptr as *mut T))
+    Ok(SmartPointer::new(Some(ptr as *mut T)))
 }
 
 pub fn free<T>(vallocator: &mut Valloc, ptr: &mut SmartPointer<T>) -> Result<(), String> {
     if ptr.is_null() { return Err(format!("Pointer is null: Cannot free a null or already freed pointer!")); }
+    let pptr = ptr.ptr().unwrap();
 
     // first we need to check if the pointer is in the memory
-    if (ptr.ptr() as *mut u8) < vallocator.memory || (ptr.ptr() as *mut u8) >= (vallocator.memory as usize + vallocator.len) as *mut u8 {
-        return Err(format!("Pointer is not in memory: SmartPointer:{{{:#X}}}", (ptr.ptr() as *const u8) as usize));
+    if (pptr as *mut u8) < vallocator.memory || (pptr as *mut u8) >= (vallocator.memory as usize + vallocator.len) as *mut u8 {
+        return Err(format!("Pointer is not in memory: SmartPointer:{{{:#X}}}", (pptr as *const u8) as usize));
     }
 
     // now we need to check if the pointer is in the chunks
@@ -365,10 +355,10 @@ pub fn free<T>(vallocator: &mut Valloc, ptr: &mut SmartPointer<T>) -> Result<(),
     // check for any adjacent chunks that are not in use
     // and merge them with the current chunk
     while let Some(chunk) = iter.next() {
-        if chunk.get_ptr() == (ptr.ptr() as *mut u8) {
+        if chunk.get_ptr() == (pptr as *mut u8) {
             // check if the chunk is in use
             if !chunk.in_use {
-                return Err(format!("Pointer is not in use: SmartPointer:{{{:#X}}}, Maybe it was already freed?", (ptr.ptr() as *mut u8) as usize));
+                return Err(format!("Pointer is not in use: SmartPointer:{{{:#X}}}, Maybe it was already freed?", (pptr as *mut u8) as usize));
             }
 
             // check if the next chunk is not in use
@@ -405,15 +395,16 @@ pub fn free<T>(vallocator: &mut Valloc, ptr: &mut SmartPointer<T>) -> Result<(),
     }
 
     // then we need to check if the pointer is in the chunks
-    Err(format!("Pointer is not in use: SmartPointer:{{{:#X}}}, Maybe it was already freed?", (ptr.ptr() as *mut u8) as usize))
+    Err(format!("Pointer is not in use: SmartPointer:{{{:#X}}}, Maybe it was already freed?", (pptr as *mut u8) as usize))
 }
 
 pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: &mut SmartPointer<T>, nsize: usize) -> Result<SmartPointer<T>, String> {
     if ptr.is_null() { return Err(format!("Pointer is null: Cannot reallocate a null pointer!")); }
+    let pptr = ptr.ptr().unwrap();
 
     // first we need to check if the pointer is in the memory
-    if (ptr.ptr() as *mut u8) < vallocator.memory || (ptr.ptr() as *mut u8) >= (vallocator.memory as usize + vallocator.len) as *mut u8 {
-        return Err(format!("Pointer is not in memory: SmartPointer:{{{:#X}}}", (ptr.ptr() as *const u8) as usize));
+    if (pptr as *mut u8) < vallocator.memory || (pptr as *mut u8) >= (vallocator.memory as usize + vallocator.len) as *mut u8 {
+        return Err(format!("Pointer is not in memory: SmartPointer:{{{:#X}}}", (pptr as *const u8) as usize));
     }
 
     // now we let the other functions `alloc` and `free` do all the heavy lifting here :D
@@ -422,8 +413,8 @@ pub fn realloc<T>(vallocator: &mut Valloc, mut ptr: &mut SmartPointer<T>, nsize:
     // and lastly we just free the old chunk
 
     let lsize = vallocator.chunks.iter()
-        .find(|x| x.get_ptr() == ptr.ptr() as *mut u8)
-        .ok_or(format!("Pointer not found in chunks: SmartPointer:{{{:#X}}}", (ptr.ptr() as *mut u8) as usize))?
+        .find(|x| x.get_ptr() == pptr as *mut u8)
+        .ok_or(format!("Pointer not found in chunks: SmartPointer:{{{:#X}}}", (pptr as *mut u8) as usize))?
         .get_size();
 
     // allocate a new chunk of size (nsize)
