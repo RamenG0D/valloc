@@ -118,14 +118,14 @@ impl<T> std::ops::IndexMut<usize> for SmartPointer<T> {
 /// # Panics
 /// 
 /// This function will panic if the allocator is not initialized
-pub fn get_allocator() -> Result<&'static mut Valloc<'static>, &'static str> {
+pub fn get_allocator() -> &'static mut Valloc<'static> {
     pub unsafe fn get_allocator() -> Result<&'static mut Valloc<'static>, &'static str> {
         match ALLOCATOR {
             Some(ref mut allocator) => Ok(allocator.0.get_mut()),
             None => Err("Allocator not initialized!")
         }
     }
-    unsafe{ get_allocator() }
+    unsafe{ get_allocator().unwrap() }
 }
 
 /// Initializes the allocator with the total memory size (in bytes)
