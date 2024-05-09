@@ -1,17 +1,11 @@
-use crate::allocator::{GlobalValloc, Valloc};
-use std::{mem::size_of, ptr::NonNull};
+use crate::allocator::{global_allocator, valloc_init, Valloc};
+use std::mem::size_of;
 
 #[test]
 fn custom_vec() {
     // init the global valloc
-    let mut mem = [0u8; 1024]; // stack allocated
-    let mut allocator = Valloc::from_mem(
-        NonNull::new(
-            mem.as_mut_ptr()).expect("Pointer SEG"), 
-            mem.len()
-    );
-    let mut ga: GlobalValloc = GlobalValloc::new(&mut allocator);
-    let mut test = Vec::new_in(&mut ga);
+    valloc_init(1024);
+    let mut test = Vec::new_in(global_allocator());
     
 
     test.push(4u8);

@@ -1,32 +1,39 @@
-use std::{alloc::Allocator, collections::LinkedList, ptr::NonNull};
+use std::{
+    alloc::Allocator, cell::RefCell, collections::LinkedList, ptr::NonNull
+};
 
 // global allocator
-static mut ALLOCATOR: Option<GlobalValloc> = None;
+static mut ALLOCATOR:  Option<GlobalValloc> = None;
+static mut GLOBAL_MEM: Option<&mut [u8]>    = None;
 
-pub struct GlobalValloc<'a>(*mut Valloc<'a>);
+#[derive(Debug)]
+pub struct GlobalValloc<'a>(RefCell<Valloc<'a>>);
 impl<'a> GlobalValloc<'a> {
-    pub fn new(allocator: &'a mut Valloc<'a>) -> Self {
-        Self(allocator)
+    pub fn new(allocator: Valloc<'a>) -> Self {
+        Self(RefCell::new(allocator))
     }
 }
 
+pub fn global_allocator() -> &'static mut GlobalValloc<'static> {
+    unsafe{ ALLOCATOR.as_mut() }.expect("Failed to get global allocator")
+}
+
 impl<'a> From<Valloc<'a>> for GlobalValloc<'a> {
-    fn from(mut value: Valloc<'a>) -> Self {
-        let ptr = &mut value as *mut Valloc<'a>;
-        Self(unsafe{ptr.as_mut()}.unwrap())
+    fn from(value: Valloc<'a>) -> Self {
+        Self::new(value)
     }
 }
 
 unsafe impl Allocator for &mut GlobalValloc<'_> {
     fn allocate(&self, layout: std::alloc::Layout) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        unsafe{ &mut *self.0 }
+        unsafe{&mut*self.0.as_ptr()}
             .alloc(layout.size())
             .map(|ptr: SmartPointer<[u8]>| ptr.non_null_ptr())
             .map_err(|_| std::alloc::AllocError)
     }
 
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, _layout: std::alloc::Layout) {
-        unsafe{self.0.as_mut()}.unwrap()
+        unsafe{&mut*self.0.as_ptr()}
             .free(SmartPointer::new(ptr))
             .unwrap();
     }
@@ -114,7 +121,7 @@ impl<T> std::ops::IndexMut<usize> for SmartPointer<T> {
 pub fn get_allocator() -> Result<&'static mut Valloc<'static>, &'static str> {
     pub unsafe fn get_allocator() -> Result<&'static mut Valloc<'static>, &'static str> {
         match ALLOCATOR {
-            Some(ref mut allocator) => Ok(unsafe{allocator.0.as_mut()}.unwrap()),
+            Some(ref mut allocator) => Ok(allocator.0.get_mut()),
             None => Err("Allocator not initialized!")
         }
     }
@@ -128,11 +135,13 @@ pub fn get_allocator() -> Result<&'static mut Valloc<'static>, &'static str> {
 /// * `msize` - The total memory size to allocate
 pub fn valloc_init(msize: usize) {
     #[cfg(debug_assertions)]
-    if unsafe{ALLOCATOR.is_some()} {
-        panic!("Allocator already initialized!");
-    }
-    let mut allocator = Valloc::new(vec![0u8; msize].leak());
-    unsafe { ALLOCATOR = Some(GlobalValloc(&mut allocator)); }
+    if unsafe{ALLOCATOR.is_some()} { panic!("Allocator already initialized!"); }
+    #[cfg(debug_assertions)]
+    if unsafe{GLOBAL_MEM.is_some()} { panic!("Memory already initialized!"); }
+    
+
+    unsafe { GLOBAL_MEM = Some(vec![0u8; msize].leak()); }
+    unsafe { ALLOCATOR = Some(GlobalValloc::new(Valloc::new(GLOBAL_MEM.as_deref_mut().unwrap()))); }
 }
 
 /// The Valloc struct represents a Virtual Memory Allocator.
