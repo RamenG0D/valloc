@@ -1,14 +1,11 @@
 [package]
 name = "valloc"
-version = "0.0.2"
+version = "0.1.0"
 edition = "2021"
 
 [lib]
 name = "valloc"
-crate-type = ["lib"]
-
-[features]
-C = []
+crate-type = ["staticlib"]
 
 [[example]]
 crate-type = ["bin"]
@@ -20,4 +17,3 @@ test  = false
 bench = false
 
 [dependencies]
-lazy_static = "1.4.0"

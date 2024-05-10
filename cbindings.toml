@@ -18,7 +18,7 @@ include_version = true
 # namespace = "my_namespace"
 # namespaces = []
 # using_namespaces = []
-sys_includes = [ "stdint.h" ]
+sys_includes = [ "stdint.h", "stddef.h" ]
 # includes = []
 no_includes = true
 cpp_compat = true
@@ -56,13 +56,12 @@ documentation_style = "c"
 
 style = "both"
 sort_by = "Name" # default for `fn.sort_by` and `const.sort_by`
-usize_is_size_t = false
+usize_is_size_t = true
 
 
 [defines]
-"feature = C" = "C_BINDGEN"
+# "feature = C" = "C_BINDGEN"
 valloc_already_exists_fix = "undef __USE_MISC"
-
 
 [export]
 include = []
@@ -72,7 +71,6 @@ item_types = []
 renaming_overrides_prefixing = false
 
 [export.rename]
-"CPointer" = "Pointer"
 
 [export.body]
 

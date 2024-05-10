@@ -30,8 +30,8 @@ fn main() {
     println!("Compiling...");
     let mut compile = Command::new("gcc");
     compile.args([
-        "-o", "test", 
-        "examples/test.c", 
+        "-o", "mtest", 
+        "examples/mem_test.c", 
         "-I.", 
         "-L./target/release/",
         "-L./target/debug/", 
@@ -40,11 +40,11 @@ fn main() {
     println!("Compilation Succesful!");
 
     println!("Running...\n");
-    Command::new("./test").spawn().unwrap().wait().unwrap();
+    Command::new("./mtest").spawn().unwrap().wait().unwrap();
     println!("\nRun Succesful!");
 
     println!("Cleaning Up...");
-    Command::new("rm").args(["valloc.h", "test"]).spawn().unwrap().wait().unwrap();
+    Command::new("rm").args(["valloc.h", "mtest"]).spawn().unwrap().wait().unwrap();
     println!("Clean Up Succesful!");
 
     println!("Finished Exiting...");

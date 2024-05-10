@@ -12,6 +12,10 @@ impl<'a> GlobalValloc<'a> {
     pub fn new(allocator: Valloc<'a>) -> Self {
         Self(RefCell::new(allocator))
     }
+
+    pub fn from_ptr(allocator: &mut Valloc<'a>) -> Self {
+        Self(RefCell::new(allocator.clone()))
+    }
 }
 
 pub fn global_allocator() -> &'static mut GlobalValloc<'static> {
@@ -26,14 +30,14 @@ impl<'a> From<Valloc<'a>> for GlobalValloc<'a> {
 
 unsafe impl Allocator for &mut GlobalValloc<'_> {
     fn allocate(&self, layout: std::alloc::Layout) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        unsafe{&mut*self.0.as_ptr()}
+        self.0.borrow_mut()
             .alloc(layout.size())
             .map(|ptr: SmartPointer<[u8]>| ptr.non_null_ptr())
             .map_err(|_| std::alloc::AllocError)
     }
 
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, _layout: std::alloc::Layout) {
-        unsafe{&mut*self.0.as_ptr()}
+        self.0.borrow_mut()
             .free(SmartPointer::new(ptr))
             .unwrap();
     }
@@ -49,8 +53,30 @@ pub struct SmartPointer<T>
 impl<T> SmartPointer<T> 
     where T: ?Sized
 {
+    /// Creates a new SmartPointer instance.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ptr` - The pointer to be wrapped.
     pub fn new(ptr: NonNull<T>) -> Self {
         Self {ptr}
+    }
+
+    /// Uncheck Version of new
+    /// 
+    /// # Safety
+    /// 
+    /// The caller must ensure that the pointer is not null
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ptr` - The pointer to be wrapped
+    /// 
+    /// # Returns
+    /// 
+    /// * `SmartPointer<T>` - The wrapped pointer
+    pub unsafe fn new_unchecked(ptr: *mut T) -> Self {
+        Self {ptr: NonNull::new_unchecked(ptr)}
     }
 
     pub fn as_ptr(&self) -> *mut T {
@@ -98,6 +124,7 @@ impl<T> std::ops::IndexMut<usize> for SmartPointer<T> {
     }
 }
 
+#[no_mangle]
 /// Get a mutable reference to the global allocator
 /// 
 /// # Safety
@@ -128,6 +155,7 @@ pub fn get_allocator() -> &'static mut Valloc<'static> {
     unsafe{ get_allocator().unwrap() }
 }
 
+#[no_mangle]
 /// Initializes the allocator with the total memory size (in bytes)
 /// 
 /// # Arguments
@@ -144,6 +172,22 @@ pub fn valloc_init(msize: usize) {
     unsafe { ALLOCATOR = Some(GlobalValloc::new(Valloc::new(GLOBAL_MEM.as_deref_mut().unwrap()))); }
 }
 
+#[no_mangle]
+pub extern "C" fn global_init_memory(mem: *mut (), len: usize) {
+    #[cfg(debug_assertions)]
+    if unsafe{GLOBAL_MEM.is_some()} { panic!("Memory already initialized!"); }
+
+    unsafe { GLOBAL_MEM = Some(std::slice::from_raw_parts_mut(mem.cast(), len)); }
+}
+
+#[no_mangle]
+pub extern "C" fn global_init_allocator(allocator: *mut Valloc<'static>) {
+    #[cfg(debug_assertions)]
+    if unsafe{ALLOCATOR.is_some()} { panic!("Allocator already initialized!"); }
+
+    unsafe { ALLOCATOR = Some(GlobalValloc::from_ptr(allocator.as_mut().unwrap())); }
+}
+
 /// The Valloc struct represents a Virtual Memory Allocator.
 /// It will be used to simulate the ability to allocate and deallocate memory.
 /// and is used on a simple stack or heap allocated array of bytes.
@@ -157,9 +201,9 @@ pub fn valloc_init(msize: usize) {
 /// - `free()` : deallocate a MemoryChunk instance
 /// - `read()` : read from the memory
 /// - `write()`: write to the memory
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Valloc<'a> {
-    memory: &'a mut [u8],
+    memory: &'a [u8],
 
     chunks: ChunkList, 
 }
@@ -171,7 +215,7 @@ impl From<&[u8]> for Valloc<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ChunkList {
     list: LinkedList< Box<ChunkNode> >,
     available: usize,
@@ -192,10 +236,6 @@ impl ChunkList {
 
     pub fn iter_mut(&mut self) -> std::collections::linked_list::IterMut< Box<ChunkNode> > {
         self.list.iter_mut()
-    }
-
-    pub fn into_iter(self) -> std::collections::linked_list::IntoIter< Box<ChunkNode> > {
-        self.list.into_iter()
     }
 
     pub fn push_back(&mut self, chunk: Box<ChunkNode>) {
@@ -237,8 +277,7 @@ impl ChunkNode {
         Self { ptr, size, in_use }
     }
 
-    pub fn get_ptr<T: Sized>(&self) -> *mut T
-    {
+    pub fn get_ptr<T: Sized>(&self) -> *mut T {
         self.ptr as *mut T
     }
 
@@ -269,7 +308,7 @@ impl<'a> Valloc<'a> {
         // we also must adjust the len to be in bytes (which is len * `the difference between size_of::<T>() and size_of::<u8>()`)
         let len = memory.len();
         let chunks = {
-            let memory = memory.as_mut().as_mut_ptr() as *mut u8;
+            let memory = memory.as_mut().as_mut_ptr();
             ChunkList::new(
                 Some(
                     Box::new(ChunkNode::new(
@@ -305,6 +344,14 @@ impl Valloc<'_> {
         Self { memory: unsafe{std::slice::from_raw_parts_mut(memory.as_ptr(), len)}, chunks }
     }
 
+    pub fn chunks(&self) -> &ChunkList {
+        &self.chunks
+    }
+
+    pub fn memory(&self) -> &[u8] {
+        self.memory
+    }
+
     /// Allocate a new MemoryChunk instance.
     /// 
     /// This method checks if there is enough contiguous space in the memory to allocate the chunk.
@@ -322,7 +369,7 @@ impl Valloc<'_> {
     /// # Note
     /// 
     /// This method allocates in bytes.
-    pub fn alloc<T: ?Sized>(&mut self, size: usize) -> Result<SmartPointer<T>, &'static str> {
+    pub fn alloc<T: ?Sized>(&mut self, size: usize) -> Result<SmartPointer<T>, String> {
         alloc(self, size)
     }
 
@@ -387,19 +434,36 @@ impl Valloc<'_> {
     }
 }
 
-pub fn alloc<T: ?Sized>(vallocator: &mut Valloc, size: usize) -> Result<SmartPointer<T>, &'static str> {
+pub fn alloc<T: ?Sized>(vallocator: &mut Valloc, size: usize) -> Result<SmartPointer<T>, String> {
     // only check if not release
-    #[cfg(debug_assertions)]
-    if size == 0 { return Err("Size must be greater than 0!"); }
+    if size == 0 { return Err(format!("Size must be greater than 0 => Requested: {size} bytes")); }
 
     // first we need to check if there is enough space in the memory
     if size > vallocator.memory.len() {
-        return Err("Not enough space in memory!");
+        return Err(format!(
+            r#"
+            Not enough space in total memory!
+            Requested: {size} bytes
+            Available: {} bytes
+            "#, vallocator.memory.len()
+        ));
     }
 
     // then we need to check if there is enough contiguous space in the memory
     let mut iter = vallocator.chunks.iter_mut();
-    let chunk = iter.find(|x| !x.in_use && x.size >= size).ok_or("Not enough contiguous space in memory!")?;
+    let chunk = if let Some(v) = iter.find(|x| {
+        !x.in_use && x.size >= size
+    }) { v } else {
+        let available = vallocator.chunks.available;
+        
+        return Err(format!(r#"
+    Error: Not enough contiguous space in memory
+    Requested: {size} bytes
+    Available: {available} bytes
+    Chunks: {:?}
+        "#, vallocator.chunks()
+        ));
+    };
     let mut new_chunk = None;
 
     // and check if we need to split the chunk
@@ -455,16 +519,6 @@ pub fn free<T: ?Sized>(vallocator: &mut Valloc, ptr: SmartPointer<T>) -> Result<
                     // merge the next chunk with the current chunk
                     chunk.size += next.size;
                     // remove the next chunk
-                    iter.next();
-                }
-            }
-
-            // check if the previous chunk is not in use
-            if let Some(prev) = iter.peek_mut() {
-                if !prev.in_use {
-                    // merge the previous chunk with the current chunk
-                    prev.size += chunk.size;
-                    // remove the current chunk
                     iter.next();
                 }
             }

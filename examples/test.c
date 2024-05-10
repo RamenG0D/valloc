@@ -1,35 +1,34 @@
 #include <stdio.h>
-
-#include "../valloc.h"
+#include "valloc.h"
 
 int main(void) {
     // init global allocator
-    valloc_init(1024);
-
+    global_init(1024);
+    
     typedef struct Inner {
         uint8_t data[10];
         float value;
     } Inner;
 
     // allocate 1 byte of memory (for a ptr)
-    Pointer ptr = valloc(sizeof(Inner));
+    Inner* ptr = (Inner*)valloc(sizeof(Inner));
 
     // write data to the memory block
-    Inner* inner = (Inner*)ptr.address;
     for (size_t i = 0; i < 10; i++) {
-        inner->data[i] = i;
+        ptr->data[i] = i;
     }
-    inner->value = 3.14;
+    ptr->value = 3.14;
 
     // read data from the memory block
+    printf("[ ");
     for(size_t i = 0; i < 10; i++) {
-        printf("%d ", inner->data[i]);
+        if(i < 9) printf("%d, ", ptr->data[i]); else printf("%d ", ptr->data[i]);
     }
-    printf("\n");
-    printf("%f\n", inner->value);
+    printf(" ]\n");
+    printf("%f\n", ptr->value);
     
     // free memory
-    vfree(&ptr);
+    vfree(ptr);
 
     return 0;
 }
