@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "valloc"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [[example]]
 crate-type = ["bin"]
