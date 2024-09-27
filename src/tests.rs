@@ -2,6 +2,32 @@ use crate::allocator::Allocator;
 use std::mem::size_of;
 
 #[test]
+fn defragmentation() {
+    let mut allocator = Allocator::new(1024);
+
+    let mut ptrs = Vec::new();
+    for _ in 0..1024 {
+        let mut ptr = allocator.alloc::<u8>(1).unwrap();
+        *ptr = 1;
+        ptrs.push(ptr);
+    }
+
+    for ptr in ptrs {
+        allocator.free(ptr).unwrap();
+    }
+
+    let mut ptr = allocator.alloc::<u32>(size_of::<u32>()).unwrap();
+
+    // allocator.get_mmap().iter().for_each(|m| println!("{:?}", m));
+
+    *ptr = 1;
+
+    assert_eq!(*ptr, 1);
+
+    allocator.free(ptr).unwrap();
+}
+
+#[test]
 fn alloc_u8() {
     let mut allocator = Allocator::new(1024);
 

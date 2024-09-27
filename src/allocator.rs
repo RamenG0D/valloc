@@ -92,7 +92,7 @@ impl<'a, T: ?Sized> Ptr<'a, T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct MemChunk {
     start: usize,
     end: usize,
@@ -151,6 +151,10 @@ impl<'a> Allocator<'a> {
         }
     }
 
+    pub fn get_mmap(&self) -> &Vec<MemChunk> {
+        &self.mmap
+    }
+
     pub fn get_memory(&self) -> &RefCell<Box<[u8]>> {
         &self.memory
     }
@@ -177,6 +181,67 @@ fn ptr_to_index(ptr: usize, start: usize, len: usize) -> Result<usize, AllocErro
     Ok(ptr - start)
 }
 
+fn convert_to_type_ptr<T: ?Sized>(mem: &mut [u8]) -> (*mut T, usize) {
+    let (ptr, len) = (mem.as_mut_ptr(), mem.len());
+    // now we must do a little type fuckery to get the pointer to the correct type
+    let ptr = &ptr as *const *mut _ as *const *mut T;
+    debug_assert!(!ptr.is_null());
+    debug_assert!(!unsafe{*ptr}.is_null());
+    (unsafe{ *ptr }, len)
+}
+
+fn get_chunk(mmap: &mut Vec<MemChunk>, size: usize) -> Result<(usize, MemChunk), AllocError> {
+    let (index, mut chunk) = match mmap.iter_mut().enumerate().find(|(_, chunk)| chunk.is_free() && chunk.size() >= size) {
+        Some((s, c)) => (s, *c),
+        None => {
+            // if we didnt find one then we need to see if we can combine other free contiguous chunks to make one chunk large enough for our size
+            // otherwise we are actually OOM
+            let mut free_chunks: Vec<MemChunk> = Vec::new();
+            let mut found_enough = false;
+            let mut index = 0;
+            while !found_enough {
+                if index >= mmap.len() {
+                    return Err(AllocError::OOM);
+                }
+
+                let chunk = &mmap[index];
+
+                // if we find a free chunk
+                let contiguous = match free_chunks.last() {
+                    Some(v) => v.end == chunk.start,
+                    None => true,
+                };
+                if chunk.is_free() && contiguous {
+                    // add the chunk to the list of free chunks
+                    free_chunks.push(chunk.clone());
+
+                    // check if we have enough chunks to make a chunk large enough for our size
+                    let mut total_size = 0;
+                    for chunk in &free_chunks {
+                        total_size += chunk.size();
+                    }
+
+                    if total_size >= size {
+                        found_enough = true;
+                    }
+                }
+
+                index += 1;
+            }
+
+            // we found enough chunks to make a chunk large enough for our size
+            // than we can combine all of them and return our new chunk
+            mmap.drain(index - free_chunks.len()..index);
+            let chunk = MemChunk::new(free_chunks[0].start, free_chunks[free_chunks.len() - 1].end);
+            (index - free_chunks.len(), chunk)
+        }
+    };
+
+    chunk.set_free(false);
+
+    Ok((index, chunk))
+}
+
 pub fn alloc<'a, T: ?Sized>(allocatorator: &mut Allocator<'a>, size: usize) -> Result<Ptr<'a, T>, AllocError> {
     debug_assert_ne!(size, 0, "Cannot allocate 0 bytes");
 
@@ -184,14 +249,22 @@ pub fn alloc<'a, T: ?Sized>(allocatorator: &mut Allocator<'a>, size: usize) -> R
 
     // find the first chunk that is free and has enough space
     let (index, nchunk) = {
-        let (index, chunk) = allocatorator.mmap.iter_mut().enumerate().find(|(_, chunk)| chunk.is_free() && chunk.size() >= size).ok_or(AllocError::OOM)?;
+        let (index, mut chunk) = get_chunk(&mut allocatorator.mmap, size)?;
 
-        // split the chunk into the portion we are using and the portion that is leftover
+        // check if its equal to the size of the chunk
+        if chunk.size() == size {
+            chunk.set_free(false);
+
+            let (ptr, len) = convert_to_type_ptr::<T>(&mut mem[chunk.start..chunk.end]);
+
+            return Ptr::new(ptr, len).or(Err(AllocError::InvalidPointer));
+        }
+
+        // we need to split the chunk into two chunks
         let nchunk = MemChunk::new(chunk.start + size, chunk.end);
-        // nchunk.free = true; // this is the default value
 
-        // make the end of the current chunk the stop after the new size ([*********] into [*****][***])
         chunk.end = chunk.start + size;
+        chunk.set_free(false);
 
         (index, nchunk)
     };
@@ -200,18 +273,8 @@ pub fn alloc<'a, T: ?Sized>(allocatorator: &mut Allocator<'a>, size: usize) -> R
     allocatorator.mmap.insert(index + 1, nchunk);
 
     // return the pointer to the start of the chunk
-    let (ptr, len) = {
-        let mem = {
-            let ochunk = &allocatorator.mmap[index];
-            &mut mem[ochunk.start..ochunk.end]
-        };
-        (mem.as_mut_ptr(), mem.len())
-    };
-    debug_assert!(!ptr.is_null());
-
-    // now we must do a little type fuckery to get the pointer to the correct type
-    let ptr = &ptr as *const *mut _ as *const *mut T;
-    let ptr = unsafe{ *ptr };
+    let ochunk = &allocatorator.mmap[index];
+    let (ptr, len) = convert_to_type_ptr::<T>(&mut mem[ochunk.start..ochunk.end]);
 
     Ptr::new(ptr, len).or(Err(AllocError::InvalidPointer))
 }
