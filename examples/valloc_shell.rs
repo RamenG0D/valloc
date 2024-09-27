@@ -1,13 +1,17 @@
 // use std::io::Write;
 
+use std::io::Write;
+
+use valloc::allocator::Allocator;
+
 fn main() {
-    /*let mut v = Valloc::new(4096);
+    let mut v = Allocator::new(4096);
 
     // a vec that stores the variables
     let mut variables = Vec::new();
 
     // a little python like language which can just test the allocator
-    loop {        
+    loop {
         print!(">>> "); std::io::stdout().flush().unwrap();
 
         let mut input = String::new();
@@ -15,6 +19,16 @@ fn main() {
         let input = input.trim();
 
         if input == "exit" { break; }
+        // the help command
+        if input == "help" {
+            println!("Commands:");
+            println!("\tlet <var_name> = <value>;");
+            println!("\tprint <var_name>;");
+            println!("\tfree <var_name>;");
+            println!("\tvars - list all variables;");
+            println!("\texit - exit the shell;");
+            continue;
+        }
 
         let mut tokens = input.split_whitespace().map(|x| x.to_string());
         let command = tokens.next().unwrap();
@@ -23,11 +37,14 @@ fn main() {
         if command == "let" {
             let var_name = tokens.next().unwrap().clone();
             let _ = tokens.next().unwrap(); // skip the `=`
-            let value = tokens.next().unwrap().parse::<i32>().unwrap();
+            let value = tokens.next().unwrap();
+            // just a quick check for a ';' at the end
+            let value = value.trim_end_matches(';').parse::<i32>().unwrap();
 
             // allocate memory for the variable
-            let ptr = v.alloc_type(1).unwrap();
-            v.write(&ptr, value).unwrap();
+            let mut ptr = v.alloc(1).unwrap();
+
+            *ptr = value;
 
             // store the variable name and value
             variables.push((var_name, ptr));
@@ -35,32 +52,55 @@ fn main() {
             // debug vars list
             let var_name = tokens.next().unwrap().clone();
 
-            let var = variables.iter().find(|(name, _)| name == &var_name).unwrap();
+            let (_, ptr) = variables.iter().find(|(name, _)| name == &var_name).expect("Variable not found");
 
-            let value = v.read(&var.1).unwrap();
-            println!("{}", value);
+            println!("{}", **ptr);
         } else if command == "free" {
             let var_name = tokens.next().unwrap().clone();
-            let var = variables.iter_mut().find(|(name, _)| name == &var_name).unwrap();
-            v.free(&mut var.1).unwrap();
 
-            // remove the variable from the list
-            variables.retain(|(name, _)| name != &var_name);
+            // find the variable (the ptr must not be a reference we need to consume it)
+            let (index, _) = variables.iter().enumerate().find(|(_, (name, _))| name == &var_name).unwrap();
+            // now we have its index we just need to move its value when we get it
+            let (_, ptr) = variables.remove(index);
+
+            // free the variable
+            v.free(ptr).unwrap();
         } else if command == "vars" {
             for (name, ptr) in &variables {
-                let value = v.read(&ptr).unwrap();
-                println!("{} = {}", name, value);
+                println!("{} = {}", name, **ptr);
             }
-        } else if let Some((vname, vvalue)) = variables.iter().find(|(vname, _)| *vname == command) {
-            // remove '=' sign
-            let _ = tokens.next().unwrap();
-            // if found we overwrite the current value with the new value
-            let value = tokens.next().unwrap();
+        } else if let Some((vname, vvalue)) = variables.iter_mut().find(|(vname, _)| *vname == command) {
+            macro_rules! parse {
+                ($tokens:expr) => {
+                    match $tokens {
+                        Some(val) => val,
+                        None => {
+                            println!("Expected value after '{}'", command);
+                            continue;
+                        }
+                    }
+                };
+                (i32; $tokens:expr) => {
+                    match $tokens {
+                        Ok(val) => val,
+                        Err(_) => {
+                            println!("Expected integer value after '{}'", command);
+                            continue;
+                        }
+                    }
+                };
+            }
 
-            let value = value.parse::<i32>().unwrap();
-            v.write(&vvalue, value).unwrap();
+            // remove '=' sign
+            let _ = parse!(tokens.next());
+            // if found we overwrite the current value with the new value
+            let value = parse!(tokens.next());
+            // remove the ';' at the end
+            let value = value.trim_end_matches(';');
+
+            let value = parse!(i32; value.parse::<i32>());
+            **vvalue = value;
             println!("{} = {}", vname, value);
         }
-    }*/
-    panic!("Unavailable for now!")
+    }
 }

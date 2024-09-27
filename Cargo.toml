@@ -1,15 +1,10 @@
 [package]
 name = "valloc"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
 name = "valloc"
-crate-type = ["staticlib", "rlib"]
-
-[[example]]
-crate-type = ["bin"]
-name = "c_test"
 
 [[example]]
 name  = "valloc_shell"
@@ -17,3 +12,6 @@ test  = false
 bench = false
 
 [dependencies]
+anyhow = "1.0.89"
+either = "1.13.0"
+unique = "0.9.1"
